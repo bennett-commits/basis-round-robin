@@ -1,0 +1,13 @@
+{
+  "name": "basis-round-robin",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Basis BDR to AE round robin tool with a live shared backend and hourly Salesforce sync.",
+  "scripts": {
+    "dev": "wrangler pages dev . --kv RR_KV",
+    "deploy": "wrangler pages deploy ."
+  },
+  "devDependencies": {
+    "wrangler": "^3.90.0"
+  }
+}

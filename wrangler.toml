@@ -1,0 +1,11 @@
+name = "basis-round-robin"
+compatibility_date = "2024-09-01"
+pages_build_output_dir = "."
+
+# Created via `wrangler kv namespace create RR_KV` (see README), then bind it
+# here with the id it prints back, OR bind it in the Cloudflare Pages
+# dashboard under Settings > Functions > KV namespace bindings (either works;
+# the dashboard binding is what actually takes effect for a Pages deploy).
+# [[kv_namespaces]]
+# binding = "RR_KV"
+# id = "REPLACE_WITH_KV_NAMESPACE_ID"
