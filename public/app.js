@@ -217,9 +217,6 @@
       ? '<div class="opp-link-note">↳ '+escapeHtml(entry.oppName)+(entry.oppStage ? ' · '+escapeHtml(entry.oppStage) : '')+'</div>'
       : "";
     var actions = "";
-    if(!entry.held){
-      actions += '<button class="mark-held-btn" data-action="mark-held" data-id="'+entry.id+'">Mark held</button>';
-    }
     if(opts.showDelete){
       actions += ' <button class="remove-btn" data-action="delete-log" data-id="'+entry.id+'" title="Delete assignment">✕</button>';
     }
@@ -239,11 +236,6 @@
       el.addEventListener("change", function(){
         api("/api/log/account", { method:"POST", body:{ id: el.getAttribute("data-id"), accountName: el.value.trim() } })
           .then(fetchState);
-      });
-    });
-    container.querySelectorAll('[data-action="mark-held"]').forEach(function(el){
-      el.addEventListener("click", function(){
-        api("/api/log/held", { method:"POST", body:{ id: el.getAttribute("data-id") } }).then(fetchState);
       });
     });
     container.querySelectorAll('[data-action="delete-log"]').forEach(function(el){

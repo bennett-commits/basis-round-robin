@@ -113,7 +113,7 @@
 
     <p class="admin-footnote">
       <b>Target weight</b> is the % share of round-robin deals an AE should receive; the spinner uses deficit-based fair queueing so actual assignments converge to these targets over many spins rather than drifting with short-run randomness.
-      <b>Booked / Held (RR)</b> counts only deals assigned <i>through this tool</i>. Booking increments automatically on each spin; Held increments when a BDR marks it, or automatically once the hourly Salesforce sync sees the linked opp reach Discovery.
+      <b>Booked / Held (RR)</b> counts only deals assigned <i>through this tool</i>. Booking increments automatically on each spin; Held increments automatically once the hourly Salesforce sync sees the linked opp reach Discovery — there's no manual override, since self-reported "held" status defeats the point of weighting off real Salesforce data.
       <b>Held, all sources (30d)</b> is informational only — every Opportunity that reached Discovery in the trailing 30 days, regardless of how it was booked — and is never factored into assignment. Refreshed automatically every hour. Last synced: <span id="sfPullDateLabel">—</span>.
     </p>
 

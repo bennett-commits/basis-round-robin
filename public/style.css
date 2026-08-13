@@ -157,11 +157,6 @@
   .pill-booked{ background:var(--accent-soft); color:var(--accent-strong); }
   .pill-held{ background:var(--accent); color:#fff; }
   .pill-lost{ background:var(--critical-soft); color:var(--critical); }
-  .mark-held-btn{
-    font-family:var(--font-body); font-size:12px; font-weight:600; color:var(--accent-strong); background:none;
-    border:1px solid var(--accent); border-radius:7px; padding:5px 10px; cursor:pointer; white-space:nowrap;
-  }
-  .mark-held-btn:hover{ background:var(--accent-soft); }
   .empty-log{ font-size:13px; color:var(--ink-soft); padding:16px 0; text-align:center; }
   .account-input{ width:140px !important; }
   .opp-link-note{ font-size:11px; color:var(--ink-soft); margin-top:2px; }

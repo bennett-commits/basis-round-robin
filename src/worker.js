@@ -52,21 +52,6 @@ const routes = {
     return json({ entry });
   },
 
-  "POST /api/log/held": async ({ request, env }) => {
-    const body = await readJson(request);
-    if (!body) return json({ error: "Invalid JSON body" }, { status: 400 });
-    const state = await loadState(env);
-    const entry = findLogEntry(state, body.id);
-    if (!entry) return json({ error: "Log entry not found" }, { status: 404 });
-    if (!entry.held) {
-      entry.held = true;
-      const ae = findAe(state, entry.aeId);
-      if (ae) ae.heldRR += 1;
-      await saveState(env, state);
-    }
-    return json({ entry });
-  },
-
   "POST /api/log/delete": async ({ request, env }) => {
     const unauthorized = requireAdmin(request, env);
     if (unauthorized) return unauthorized;
