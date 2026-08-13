@@ -19,6 +19,7 @@ const routes = {
       hasKv: !!env.RR_KV,
       adminPasswordLength: typeof env.ADMIN_PASSWORD === "string" ? env.ADMIN_PASSWORD.length : null,
       syncTokenLength: typeof env.SYNC_TOKEN === "string" ? env.SYNC_TOKEN.length : null,
+      syncTokenPreview: typeof env.SYNC_TOKEN === "string" ? (env.SYNC_TOKEN.slice(0, 8) + "..." + env.SYNC_TOKEN.slice(-8)) : null,
       envKeys: Object.keys(env)
     });
   },
