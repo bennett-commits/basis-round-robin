@@ -74,16 +74,19 @@
     if(reelAnimating) return;
     var track = document.getElementById("reelTrack");
     var empty = document.getElementById("reelEmpty");
+    var fullName = document.getElementById("reelFullName");
     var queue = state.nextQueue || [];
     track.style.transform = "translateY(0)";
     if(queue.length===0){
       track.innerHTML = "";
       empty.style.display = "block";
+      fullName.textContent = "";
       return;
     }
     empty.style.display = "none";
-    track.innerHTML = queue.map(function(item, i){
-      var cls = "reel-row q"+Math.min(i,3);
+    fullName.textContent = queue[0].name;
+    track.innerHTML = queue.slice(0,2).map(function(item, i){
+      var cls = "reel-row q"+i;
       var color = colorFor(colorIndexForAe(item.id));
       return '<div class="'+cls+'" style="background:'+color+'">'+escapeHtml(item.name.split(" ")[0])+'</div>';
     }).join("");
@@ -162,56 +165,50 @@
   // `winner` (already the real, server-confirmed pick), then bursts fireworks
   // at the moment it lands. Purely a celebratory reveal — the outcome is
   // already decided, this is just how it's shown.
+  // Fireworks celebrate the booking that just happened first, then the reel
+  // makes one simple step up to reveal who's next — no roulette-style spin.
   function playReelSpin(winner, done){
     var track = document.getElementById("reelTrack");
     var wrap = document.getElementById("reelWrap");
-    var roster = activeAes();
-
-    var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     var wrapRect = wrap.getBoundingClientRect();
     var landingX = wrapRect.left + wrapRect.width/2;
-    var landingY = wrapRect.top + 35; // q0 row is 70px tall, centered ~35px from window top
+    var landingY = wrapRect.top + 35; // current row is 70px tall, centered ~35px from window top
 
-    if(roster.length===0 || reduceMotion){
-      launchFireworks(landingX, landingY);
-      done();
+    launchFireworks(landingX, landingY);
+
+    var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    var firstRow = track.children[0];
+    if(!firstRow || reduceMotion){
+      setTimeout(done, reduceMotion ? 0 : 500);
       return;
     }
 
     reelAnimating = true;
-    var loops = 3;
-    var seq = [];
-    for(var L=0; L<loops; L++){
-      roster.forEach(function(a){ seq.push(a); });
-    }
-    seq.push({ id: winner.id, name: winner.name });
+    var shiftMs = 550;
+    var celebrateDelayMs = 450; // let the fireworks land on the just-booked name before advancing
 
-    track.style.transition = "none";
-    track.style.transform = "translateY(0px)";
-    track.innerHTML = seq.map(function(item){
-      return '<div class="reel-row spin-row" style="background:'+colorFor(colorIndexForAe(item.id))+'">'+escapeHtml(item.name.split(" ")[0])+'</div>';
-    }).join("");
-
-    void track.offsetHeight; // force layout so the reset above doesn't itself animate
-
-    var targetY = -(seq.length-1)*ROW_STEP;
-    var spinMs = 1150;
-    requestAnimationFrame(function(){
-      track.style.transition = "transform "+spinMs+"ms cubic-bezier(0.11, 0.72, 0.16, 1)";
-      track.style.transform = "translateY("+targetY+"px)";
-    });
+    setTimeout(function(){
+      requestAnimationFrame(function(){
+        requestAnimationFrame(function(){
+          track.style.transition = "transform "+shiftMs+"ms cubic-bezier(0.22, 0.61, 0.36, 1)";
+          track.style.transform = "translateY(-"+ROW_STEP+"px)";
+        });
+      });
+    }, celebrateDelayMs);
 
     var finished = false;
     function onDone(){
       if(finished) return;
       finished = true;
       track.removeEventListener("transitionend", onDone);
-      launchFireworks(landingX, landingY);
+      track.style.transition = "none";
+      track.style.transform = "translateY(0px)";
       reelAnimating = false;
+      requestAnimationFrame(function(){ track.style.transition = ""; });
       done();
     }
     track.addEventListener("transitionend", onDone);
-    setTimeout(onDone, spinMs + 150);
+    setTimeout(onDone, celebrateDelayMs + shiftMs + 150);
   }
 
   // ---------- Book meeting ----------
@@ -253,8 +250,7 @@
 
   function showResult(winner, bdrName, entry){
     document.getElementById("resultSlot").innerHTML =
-      '<div class="result-name">'+escapeHtml(winner.name)+'</div>' +
-      '<div class="result-meta">Booked via round robin · assigned just now by '+escapeHtml(bdrName)+'</div>' +
+      '<div class="result-meta">Booked '+escapeHtml(winner.name)+' via round robin · assigned just now by '+escapeHtml(bdrName)+'</div>' +
       '<div class="result-account-quickadd"><input type="text" id="quickAccountInput" placeholder="Account name (optional)" /></div>';
     var quickInput = document.getElementById("quickAccountInput");
     quickInput.addEventListener("change", function(){
