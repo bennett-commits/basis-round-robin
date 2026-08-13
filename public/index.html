@@ -60,7 +60,7 @@
 
       <div class="log-card">
         <h2>Recent assignments</h2>
-        <p class="log-sub">Shared live across everyone on this page. Add the account name once it's booked — the hourly Salesforce sync links it to an opp and updates status automatically.</p>
+        <p class="log-sub">Shared live across everyone on this page. Add the account name once it's booked — the hourly Salesforce sync links it to an opp and updates status automatically. Spun by accident? Press 🚩 to flag it for an admin to clear.</p>
         <div class="ae-table-wrap" style="box-shadow:none;">
           <table class="ae-table" style="min-width:620px;">
             <thead>
@@ -116,6 +116,20 @@
       <b>Booked / Held (RR)</b> counts only deals assigned <i>through this tool</i>. Booking increments automatically on each spin; Held increments automatically once the hourly Salesforce sync sees the linked opp reach Discovery — there's no manual override, since self-reported "held" status defeats the point of weighting off real Salesforce data.
       <b>Held, all sources (30d)</b> is informational only — every Opportunity that reached Discovery in the trailing 30 days, regardless of how it was booked — and is never factored into assignment. Refreshed automatically every hour. Last synced: <span id="sfPullDateLabel">—</span>.
     </p>
+
+    <div class="admin-toolbar" style="margin-top:30px;">
+      <h2>Flagged for review</h2>
+    </div>
+    <p class="log-sub" style="margin:-4px 0 12px;">BDRs flag a spin with 🚩 when it was a false click. Clearing it removes the assignment entirely and rolls back that AE's Booked/Held (RR) counts by one.</p>
+    <div class="ae-table-wrap">
+      <table class="ae-table" style="min-width:760px;">
+        <thead>
+          <tr><th>Time</th><th>BDR</th><th>AE</th><th>Account name</th><th>Status</th><th></th></tr>
+        </thead>
+        <tbody id="flaggedLogBody"></tbody>
+      </table>
+    </div>
+    <div class="empty-log" id="flaggedEmptyLog" style="display:none;">Nothing flagged right now.</div>
 
     <div class="admin-toolbar" style="margin-top:30px;">
       <h2>Assignment log</h2>

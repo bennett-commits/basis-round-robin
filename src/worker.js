@@ -32,7 +32,7 @@ const routes = {
     winner.bookedRR += 1;
     const entry = {
       id: newId("log"), aeId: winner.id, name: winner.name, bdrName,
-      accountName: "", held: false, lost: false,
+      accountName: "", held: false, lost: false, flagged: false,
       oppId: null, oppName: null, oppStage: null,
       ts: new Date().toISOString()
     };
@@ -48,6 +48,17 @@ const routes = {
     const entry = findLogEntry(state, body.id);
     if (!entry) return json({ error: "Log entry not found" }, { status: 404 });
     entry.accountName = String(body.accountName || "").trim();
+    await saveState(env, state);
+    return json({ entry });
+  },
+
+  "POST /api/log/flag": async ({ request, env }) => {
+    const body = await readJson(request);
+    if (!body) return json({ error: "Invalid JSON body" }, { status: 400 });
+    const state = await loadState(env);
+    const entry = findLogEntry(state, body.id);
+    if (!entry) return json({ error: "Log entry not found" }, { status: 404 });
+    entry.flagged = !entry.flagged;
     await saveState(env, state);
     return json({ entry });
   },

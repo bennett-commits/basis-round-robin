@@ -214,10 +214,11 @@
 
   // ---------- Log rendering ----------
   function statusPillsHtml(entry){
-    if(!entry.held && !entry.lost) return '<span class="pill pill-booked">Booked</span>';
     var out = "";
+    if(!entry.held && !entry.lost) out += '<span class="pill pill-booked">Booked</span>';
     if(entry.held) out += '<span class="pill pill-held">Held</span>';
     if(entry.lost) out += '<span class="pill pill-lost">Lost</span>';
+    if(entry.flagged) out += '<span class="pill pill-flagged">Flagged</span>';
     return out;
   }
 
@@ -226,9 +227,10 @@
     var oppNote = entry.oppName
       ? '<div class="opp-link-note">↳ '+escapeHtml(entry.oppName)+(entry.oppStage ? ' · '+escapeHtml(entry.oppStage) : '')+'</div>'
       : "";
-    var actions = "";
+    var actions =
+      '<button class="flag-btn'+(entry.flagged?' active':'')+'" data-action="flag-log" data-id="'+entry.id+'" title="'+(entry.flagged?'Unflag':'Flag as a false click')+'">🚩</button>';
     if(opts.showDelete){
-      actions += ' <button class="remove-btn" data-action="delete-log" data-id="'+entry.id+'" title="Delete assignment">✕</button>';
+      actions += ' <button class="remove-btn" data-action="delete-log" data-id="'+entry.id+'" title="'+(opts.clearLabel||'Delete assignment')+'">'+(opts.clearLabel?opts.clearLabel:'✕')+'</button>';
     }
     var ts = new Date(entry.ts).toLocaleString([], { month:"short", day:"numeric", hour:"numeric", minute:"2-digit" });
     return (
@@ -246,6 +248,11 @@
       el.addEventListener("change", function(){
         api("/api/log/account", { method:"POST", body:{ id: el.getAttribute("data-id"), accountName: el.value.trim() } })
           .then(fetchState);
+      });
+    });
+    container.querySelectorAll('[data-action="flag-log"]').forEach(function(el){
+      el.addEventListener("click", function(){
+        api("/api/log/flag", { method:"POST", body:{ id: el.getAttribute("data-id") } }).then(fetchState);
       });
     });
     container.querySelectorAll('[data-action="delete-log"]').forEach(function(el){
@@ -289,6 +296,22 @@
     state.log.forEach(function(entry){
       var tr = document.createElement("tr");
       tr.innerHTML = logRowHtml(entry, {showDelete:true});
+      container.appendChild(tr);
+    });
+    attachLogRowHandlers(container);
+  }
+
+  function renderFlaggedReview(){
+    var container = document.getElementById("flaggedLogBody");
+    if(!container || isEditing(container)) return;
+    var empty = document.getElementById("flaggedEmptyLog");
+    var flagged = state.log.filter(function(e){ return e.flagged; });
+    container.innerHTML = "";
+    if(flagged.length===0){ empty.style.display = "block"; return; }
+    empty.style.display = "none";
+    flagged.forEach(function(entry){
+      var tr = document.createElement("tr");
+      tr.innerHTML = logRowHtml(entry, {showDelete:true, clearLabel:"Clear"});
       container.appendChild(tr);
     });
     attachLogRowHandlers(container);
@@ -414,6 +437,7 @@
     renderStats();
     renderAdmin();
     renderAdminLog();
+    renderFlaggedReview();
     renderBdrSuggestions();
     updateSpinReady();
   }
