@@ -239,7 +239,7 @@
 
     api("/api/spin", { method:"POST", body:{ bdrName: bdrName } }).then(function(res){
       playReelSpin(res.winner, function(){
-        fetchState().then(function(){ showResult(res.winner, bdrName, res.entry); });
+        fetchState().then(function(){ showResult(res.entry); });
       });
     }).catch(function(err){
       booking = false;
@@ -248,9 +248,8 @@
     });
   }
 
-  function showResult(winner, bdrName, entry){
+  function showResult(entry){
     document.getElementById("resultSlot").innerHTML =
-      '<div class="result-meta">Booked '+escapeHtml(winner.name)+' via round robin · assigned just now by '+escapeHtml(bdrName)+'</div>' +
       '<div class="result-account-quickadd"><input type="text" id="quickAccountInput" placeholder="Account name (optional)" /></div>';
     var quickInput = document.getElementById("quickAccountInput");
     quickInput.addEventListener("change", function(){
