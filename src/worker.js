@@ -10,20 +10,6 @@ async function readJson(request) {
 }
 
 const routes = {
-  // TEMPORARY diagnostic route — does not expose values, only whether the
-  // Worker's env actually has these bindings. Remove once secrets are confirmed working.
-  "GET /api/debug/env": async ({ env }) => {
-    return json({
-      hasAdminPassword: typeof env.ADMIN_PASSWORD === "string" && env.ADMIN_PASSWORD.length > 0,
-      hasSyncToken: typeof env.SYNC_TOKEN === "string" && env.SYNC_TOKEN.length > 0,
-      hasKv: !!env.RR_KV,
-      adminPasswordLength: typeof env.ADMIN_PASSWORD === "string" ? env.ADMIN_PASSWORD.length : null,
-      syncTokenLength: typeof env.SYNC_TOKEN === "string" ? env.SYNC_TOKEN.length : null,
-      syncTokenPreview: typeof env.SYNC_TOKEN === "string" ? (env.SYNC_TOKEN.slice(0, 8) + "..." + env.SYNC_TOKEN.slice(-8)) : null,
-      envKeys: Object.keys(env)
-    });
-  },
-
   "GET /api/state": async ({ env }) => {
     const state = await loadState(env);
     const eff = effectiveWeights(state);
