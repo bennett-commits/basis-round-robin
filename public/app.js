@@ -39,7 +39,17 @@
   function adminApi(path, opts){
     opts = opts || {};
     opts.headers = Object.assign({ "x-admin-password": adminPassword || "" }, opts.headers || {});
-    return api(path, opts);
+    return api(path, opts).catch(function(err){
+      if(err.status === 401){
+        adminPassword = null;
+        sessionStorage.removeItem("rr_admin_password");
+        document.getElementById("adminBtn").classList.remove("unlocked");
+        openGate("Your admin session expired or the password changed — log in again.");
+        return; // swallow so the caller's .then(fetchState) just re-syncs the real (unchanged) state
+      }
+      console.error(err);
+      throw err;
+    });
   }
 
   function fetchState(){
@@ -338,7 +348,8 @@
         '<td><div class="ae-name-cell"><span class="swatch" style="background:'+colorFor(idx)+'"></span>'+escapeHtml(a.name)+'</div></td>' +
         '<td><div class="weight-cell">' +
           '<input type="range" min="0" max="100" value="'+a.weight+'" data-action="weight" data-id="'+a.id+'"/>' +
-          '<span class="weight-val">'+a.weight+'%</span>' +
+          '<input type="number" min="0" max="100" class="num-input weight-num-input" value="'+a.weight+'" data-action="weight-num" data-id="'+a.id+'"/>' +
+          '<span class="weight-val">%</span>' +
         '</div></td>' +
         '<td><input type="number" min="0" class="num-input" value="'+a.bookedRR+'" data-action="bookedRR" data-id="'+a.id+'"/></td>' +
         '<td><input type="number" min="0" class="num-input" value="'+a.heldRR+'" data-action="heldRR" data-id="'+a.id+'"/></td>' +
@@ -354,10 +365,25 @@
         adminApi("/api/admin/ae", { method:"POST", body:{ action:"update", id: el.getAttribute("data-id"), patch:{ active: el.checked } } }).then(fetchState);
       });
     });
+    function saveWeight(id, value){
+      var v = Math.max(0, Math.min(100, parseInt(value,10) || 0));
+      adminApi("/api/admin/ae", { method:"POST", body:{ action:"update", id: id, patch:{ weight: v } } }).then(fetchState);
+    }
     body.querySelectorAll('[data-action="weight"]').forEach(function(el){
-      el.addEventListener("change", function(){
-        adminApi("/api/admin/ae", { method:"POST", body:{ action:"update", id: el.getAttribute("data-id"), patch:{ weight: parseInt(el.value,10) } } }).then(fetchState);
+      var id = el.getAttribute("data-id");
+      el.addEventListener("input", function(){
+        var numEl = body.querySelector('[data-action="weight-num"][data-id="'+id+'"]');
+        if(numEl) numEl.value = el.value;
       });
+      el.addEventListener("change", function(){ saveWeight(id, el.value); });
+    });
+    body.querySelectorAll('[data-action="weight-num"]').forEach(function(el){
+      var id = el.getAttribute("data-id");
+      el.addEventListener("input", function(){
+        var rangeEl = body.querySelector('[data-action="weight"][data-id="'+id+'"]');
+        if(rangeEl) rangeEl.value = el.value;
+      });
+      el.addEventListener("change", function(){ saveWeight(id, el.value); });
     });
     ["bookedRR","heldRR","totalHeld30d"].forEach(function(field){
       body.querySelectorAll('[data-action="'+field+'"]').forEach(function(el){
@@ -407,8 +433,9 @@
   var gatePassword = document.getElementById("gatePassword");
   var gateError = document.getElementById("gateError");
 
-  function openGate(){
-    gateError.classList.remove("show");
+  function openGate(message){
+    gateError.textContent = message || "Incorrect password.";
+    gateError.classList.toggle("show", !!message);
     gatePassword.value = "";
     gateOverlay.classList.add("open");
     setTimeout(function(){ gatePassword.focus(); }, 0);
@@ -434,6 +461,7 @@
       setView("admin");
       fetchState();
     }).catch(function(){
+      gateError.textContent = "Incorrect password.";
       gateError.classList.add("show");
     });
   }

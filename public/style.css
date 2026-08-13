@@ -206,9 +206,10 @@
     font-family:var(--font-mono); font-variant-numeric:tabular-nums; width:64px; padding:6px 8px; border:1px solid var(--line);
     border-radius:7px; background:var(--surface); color:var(--ink); font-size:13px;
   }
-  .weight-cell{ display:flex; align-items:center; gap:8px; min-width:150px; }
-  .weight-cell input[type=range]{ width:90px; accent-color:var(--accent); }
-  .weight-val{ font-family:var(--font-mono); font-variant-numeric:tabular-nums; font-size:13px; width:34px; text-align:right; }
+  .weight-cell{ display:flex; align-items:center; gap:6px; min-width:170px; }
+  .weight-cell input[type=range]{ width:80px; accent-color:var(--accent); }
+  .weight-num-input{ width:44px !important; text-align:right; }
+  .weight-val{ font-family:var(--font-mono); font-variant-numeric:tabular-nums; font-size:13px; }
   .hold-rate{ font-family:var(--font-mono); font-variant-numeric:tabular-nums; }
   .hold-rate.low{ color:var(--critical); }
   .hold-rate.mid{ color:var(--warn); }
