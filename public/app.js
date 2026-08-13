@@ -255,9 +255,13 @@
     });
   }
 
+  // Only guards actual typed-text fields from being yanked mid-edit by a poll.
+  // Checkboxes/ranges are one-shot actions, not typing — they must not block
+  // re-render, or the whole table freezes right after any toggle click.
   function isEditing(container){
     var active = document.activeElement;
-    return active && container.contains(active) && active.tagName === "INPUT";
+    if(!active || !container.contains(active) || active.tagName !== "INPUT") return false;
+    return active.type !== "checkbox" && active.type !== "range";
   }
 
   function renderLog(){
