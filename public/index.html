@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+<canvas id="fireworksCanvas" class="fireworks-canvas"></canvas>
 <div class="app">
   <header class="masthead">
     <div class="wordmark">
@@ -41,10 +42,11 @@
   <section class="view active" id="view-spin">
     <div class="spin-layout">
       <div class="wheel-card">
-        <div class="ticker-wrap" id="tickerWrap">
-          <canvas class="fireworks-canvas" id="fireworksCanvas"></canvas>
-          <div class="ticker-track" id="tickerTrack"></div>
-          <div class="ticker-empty" id="tickerEmpty">Activate at least one AE in Admin first.</div>
+        <div class="reel-wrap" id="reelWrap">
+          <div class="reel-window">
+            <div class="reel-track" id="reelTrack"></div>
+          </div>
+          <div class="reel-empty" id="reelEmpty">Activate at least one AE in Admin first.</div>
         </div>
         <div class="bdr-field">
           <label for="bdrNameInput">Booking as</label>

@@ -2,12 +2,11 @@
   "use strict";
   var PALETTE = ["#2F6F5E","#B8863B","#5B7FB0","#A65E8C","#6B8E4E","#B4483F","#3F8FA0","#8C6B3F"];
   var POLL_MS = 4000;
-  var BOOK_ANIM_MS = 550;
-  var FIREWORK_MS = 900;
+  var FIREWORK_MS = 1700;
 
   var state = { factorHoldRate:false, sfPullDate:null, aes:[], log:[], effectiveWeights:{}, overallHoldRate:null, nextQueue:[] };
   var booking = false;
-  var tickerAnimating = false;
+  var reelAnimating = false;
   var adminPassword = sessionStorage.getItem("rr_admin_password") || null;
   var pollTimer = null;
 
@@ -63,17 +62,20 @@
     });
   }
 
-  // ---------- Ticker (next-up queue) ----------
+  // ---------- Reel (next-up queue) ----------
+  var ROW_STEP = 80; // 70px row + 10px gap — must match .reel-row/.reel-track CSS
+
   function colorIndexForAe(id){
     var idx = activeAes().findIndex(function(a){ return a.id===id; });
     return idx===-1 ? 0 : idx;
   }
 
-  function renderTicker(){
-    if(tickerAnimating) return;
-    var track = document.getElementById("tickerTrack");
-    var empty = document.getElementById("tickerEmpty");
+  function renderReel(){
+    if(reelAnimating) return;
+    var track = document.getElementById("reelTrack");
+    var empty = document.getElementById("reelEmpty");
     var queue = state.nextQueue || [];
+    track.style.transform = "translateY(0)";
     if(queue.length===0){
       track.innerHTML = "";
       empty.style.display = "block";
@@ -81,100 +83,135 @@
     }
     empty.style.display = "none";
     track.innerHTML = queue.map(function(item, i){
-      var cls = "ticker-chip q"+Math.min(i,3);
+      var cls = "reel-row q"+Math.min(i,3);
       var color = colorFor(colorIndexForAe(item.id));
       return '<div class="'+cls+'" style="background:'+color+'">'+escapeHtml(item.name.split(" ")[0])+'</div>';
     }).join("");
   }
 
-  // Confetti-style burst centered on (x,y), relative to #tickerWrap.
-  function launchFireworks(x, y){
+  // Big multi-burst confetti/fireworks show, full viewport — deliberately not
+  // confined to the reel box so it actually reads as a celebration.
+  function launchFireworks(originX, originY){
     if(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     var canvas = document.getElementById("fireworksCanvas");
-    var wrap = document.getElementById("tickerWrap");
     var dpr = window.devicePixelRatio || 1;
-    var w = wrap.clientWidth, h = wrap.clientHeight;
+    var w = window.innerWidth, h = window.innerHeight;
     canvas.width = w*dpr; canvas.height = h*dpr;
     canvas.style.width = w+"px"; canvas.style.height = h+"px";
     var ctx = canvas.getContext("2d");
-    ctx.scale(dpr, dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    var count = 46;
+    var bursts = [
+      { x: originX, y: originY, delay: 0 },
+      { x: originX - w*0.22, y: originY - h*0.08, delay: 140 },
+      { x: originX + w*0.22, y: originY - h*0.05, delay: 260 },
+      { x: originX - w*0.1, y: originY - h*0.16, delay: 420 }
+    ];
     var particles = [];
-    for(var i=0;i<count;i++){
-      var angle = (Math.PI*2*i/count) + (Math.random()*0.4 - 0.2);
-      var speed = 2.2 + Math.random()*2.6;
-      particles.push({
-        x:x, y:y,
-        vx: Math.cos(angle)*speed,
-        vy: Math.sin(angle)*speed - 1.2,
-        color: PALETTE[i % PALETTE.length]
-      });
+    function spawnBurst(bx, by){
+      var count = 140;
+      for(var i=0;i<count;i++){
+        var angle = (Math.PI*2*i/count) + (Math.random()*0.5 - 0.25);
+        var speed = 4 + Math.random()*7;
+        particles.push({
+          x:bx, y:by,
+          vx: Math.cos(angle)*speed,
+          vy: Math.sin(angle)*speed - 1.6,
+          size: 3 + Math.random()*3.5,
+          color: PALETTE[Math.floor(Math.random()*PALETTE.length)],
+          born: null
+        });
+      }
     }
 
+    var totalMs = FIREWORK_MS;
     var start = null;
+    var spawned = bursts.map(function(){ return false; });
     function frame(ts){
       if(start===null) start = ts;
       var elapsed = ts - start;
+      bursts.forEach(function(b, i){
+        if(!spawned[i] && elapsed >= b.delay){ spawned[i] = true; spawnBurst(b.x, b.y); }
+      });
       ctx.clearRect(0,0,w,h);
-      var life = Math.max(0, 1 - elapsed/FIREWORK_MS);
-      ctx.globalAlpha = life;
       particles.forEach(function(p){
+        if(p.born===null) p.born = elapsed;
+        var age = elapsed - p.born;
+        var life = Math.max(0, 1 - age/(totalMs*0.75));
         p.x += p.vx;
         p.y += p.vy;
-        p.vy += 0.09;
+        p.vy += 0.14;
+        p.vx *= 0.992;
+        ctx.globalAlpha = life;
+        ctx.shadowColor = p.color;
+        ctx.shadowBlur = 8;
         ctx.fillStyle = p.color;
         ctx.beginPath();
-        ctx.arc(p.x, p.y, 2.6, 0, Math.PI*2);
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
         ctx.fill();
       });
+      ctx.shadowBlur = 0;
       ctx.globalAlpha = 1;
-      if(elapsed < FIREWORK_MS) requestAnimationFrame(frame);
+      if(elapsed < totalMs) requestAnimationFrame(frame);
       else ctx.clearRect(0,0,w,h);
     }
     requestAnimationFrame(frame);
   }
 
-  // Slides the just-booked chip out, shifting the rest of the queue forward,
-  // then hands off to `done` (which re-fetches state and rebuilds the ticker
-  // fresh with the real next-up queue from the server).
-  function advanceTicker(done){
-    var track = document.getElementById("tickerTrack");
-    var wrap = document.getElementById("tickerWrap");
-    var firstChip = track.children[0];
-
-    if(firstChip){
-      var chipRect = firstChip.getBoundingClientRect();
-      var wrapRect = wrap.getBoundingClientRect();
-      launchFireworks(chipRect.left - wrapRect.left + chipRect.width/2, chipRect.top - wrapRect.top + chipRect.height/2);
-    } else {
-      launchFireworks(wrap.clientWidth/2, wrap.clientHeight/2);
-    }
+  // Spins the reel through a few loops of the roster, landing precisely on
+  // `winner` (already the real, server-confirmed pick), then bursts fireworks
+  // at the moment it lands. Purely a celebratory reveal — the outcome is
+  // already decided, this is just how it's shown.
+  function playReelSpin(winner, done){
+    var track = document.getElementById("reelTrack");
+    var wrap = document.getElementById("reelWrap");
+    var roster = activeAes();
 
     var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if(!firstChip || reduceMotion){
+    var wrapRect = wrap.getBoundingClientRect();
+    var landingX = wrapRect.left + wrapRect.width/2;
+    var landingY = wrapRect.top + 35; // q0 row is 70px tall, centered ~35px from window top
+
+    if(roster.length===0 || reduceMotion){
+      launchFireworks(landingX, landingY);
       done();
       return;
     }
 
-    tickerAnimating = true;
-    var gapPx = parseFloat(getComputedStyle(track).gap) || 14;
-    var shiftPx = firstChip.offsetWidth + gapPx;
-    track.style.transform = "translateX(-"+shiftPx+"px)";
+    reelAnimating = true;
+    var loops = 3;
+    var seq = [];
+    for(var L=0; L<loops; L++){
+      roster.forEach(function(a){ seq.push(a); });
+    }
+    seq.push({ id: winner.id, name: winner.name });
+
+    track.style.transition = "none";
+    track.style.transform = "translateY(0px)";
+    track.innerHTML = seq.map(function(item){
+      return '<div class="reel-row spin-row" style="background:'+colorFor(colorIndexForAe(item.id))+'">'+escapeHtml(item.name.split(" ")[0])+'</div>';
+    }).join("");
+
+    void track.offsetHeight; // force layout so the reset above doesn't itself animate
+
+    var targetY = -(seq.length-1)*ROW_STEP;
+    var spinMs = 1150;
+    requestAnimationFrame(function(){
+      track.style.transition = "transform "+spinMs+"ms cubic-bezier(0.11, 0.72, 0.16, 1)";
+      track.style.transform = "translateY("+targetY+"px)";
+    });
 
     var finished = false;
     function onDone(){
       if(finished) return;
       finished = true;
       track.removeEventListener("transitionend", onDone);
-      track.style.transition = "none";
-      track.style.transform = "none";
-      tickerAnimating = false;
-      requestAnimationFrame(function(){ track.style.transition = ""; });
+      launchFireworks(landingX, landingY);
+      reelAnimating = false;
       done();
     }
     track.addEventListener("transitionend", onDone);
-    setTimeout(onDone, BOOK_ANIM_MS + 150);
+    setTimeout(onDone, spinMs + 150);
   }
 
   // ---------- Book meeting ----------
@@ -204,7 +241,7 @@
     localStorage.setItem("rr_bdr_name", bdrName);
 
     api("/api/spin", { method:"POST", body:{ bdrName: bdrName } }).then(function(res){
-      advanceTicker(function(){
+      playReelSpin(res.winner, function(){
         fetchState().then(function(){ showResult(res.winner, bdrName, res.entry); });
       });
     }).catch(function(err){
@@ -449,7 +486,7 @@
   }
 
   function render(){
-    renderTicker();
+    renderReel();
     renderLog();
     renderStats();
     renderAdmin();
