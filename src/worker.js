@@ -1,6 +1,6 @@
 import {
   loadState, saveState, activeAes, findAe, findLogEntry,
-  overallHoldRate, effectiveWeights, pickNextAe, newId,
+  overallHoldRate, effectiveWeights, pickNextAe, previewQueue, newId,
   json, requireAdmin, requireSyncToken, PAST_DISCOVERY_STAGES
 } from "./lib/state.js";
 
@@ -9,6 +9,8 @@ async function readJson(request) {
   catch (e) { return null; }
 }
 
+const PREVIEW_QUEUE_LENGTH = 4; // 1 next-up + 3 on-deck
+
 const routes = {
   "GET /api/state": async ({ env }) => {
     const state = await loadState(env);
@@ -16,7 +18,12 @@ const routes = {
     const act = activeAes(state);
     const effByAeId = {};
     act.forEach((a, i) => { effByAeId[a.id] = eff[i]; });
-    return json({ ...state, effectiveWeights: effByAeId, overallHoldRate: overallHoldRate(state) });
+    return json({
+      ...state,
+      effectiveWeights: effByAeId,
+      overallHoldRate: overallHoldRate(state),
+      nextQueue: previewQueue(state, PREVIEW_QUEUE_LENGTH)
+    });
   },
 
   "POST /api/spin": async ({ request, env }) => {

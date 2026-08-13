@@ -82,6 +82,33 @@ export function pickNextAe(state) {
   return best;
 }
 
+// Simulates the next `count` picks without touching real state — lets the
+// frontend show an upcoming queue (next-up + on-deck) that's consistent for
+// everyone, while the actual booking still re-runs pickNextAe fresh against
+// real state at the moment someone clicks Book Meeting.
+export function previewQueue(state, count) {
+  const list = activeAes(state);
+  if (list.length === 0) return [];
+  const eff = effectiveWeights(state);
+  const bookedCopy = {};
+  list.forEach(a => { bookedCopy[a.id] = a.bookedRR; });
+
+  const queue = [];
+  for (let step = 0; step < count; step++) {
+    const totalAssigned = list.reduce((s, a) => s + bookedCopy[a.id], 0);
+    let best = null, bestDeficit = -Infinity;
+    list.forEach((a, i) => {
+      const target = eff[i] / 100;
+      const deficit = target * (totalAssigned + 1) - bookedCopy[a.id];
+      if (deficit > bestDeficit) { bestDeficit = deficit; best = a; }
+    });
+    if (!best) break;
+    queue.push({ id: best.id, name: best.name });
+    bookedCopy[best.id] += 1;
+  }
+  return queue;
+}
+
 export function newId(prefix) {
   return prefix + "_" + Date.now() + "_" + Math.floor(Math.random() * 1e6);
 }

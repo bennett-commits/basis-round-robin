@@ -2,6 +2,7 @@
   "name": "basis-round-robin",
   "private": true,
   "version": "1.0.0",
+  "type": "module",
   "description": "Basis BDR to AE round robin tool with a live shared backend and hourly Salesforce sync.",
   "scripts": {
     "dev": "wrangler dev",

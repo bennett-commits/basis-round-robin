@@ -2,11 +2,12 @@
   "use strict";
   var PALETTE = ["#2F6F5E","#B8863B","#5B7FB0","#A65E8C","#6B8E4E","#B4483F","#3F8FA0","#8C6B3F"];
   var POLL_MS = 4000;
-  var SPIN_MS = 1000;
+  var BOOK_ANIM_MS = 550;
+  var FIREWORK_MS = 900;
 
-  var state = { factorHoldRate:false, sfPullDate:null, aes:[], log:[], effectiveWeights:{}, overallHoldRate:null };
-  var spinning = false;
-  var currentRotation = 0;
+  var state = { factorHoldRate:false, sfPullDate:null, aes:[], log:[], effectiveWeights:{}, overallHoldRate:null, nextQueue:[] };
+  var booking = false;
+  var tickerAnimating = false;
   var adminPassword = sessionStorage.getItem("rr_admin_password") || null;
   var pollTimer = null;
 
@@ -62,139 +63,155 @@
     });
   }
 
-  // ---------- Fairness math (mirrors server logic, for the wheel visual only) ----------
-  function effectiveWeightsList(){
-    var list = activeAes();
-    return list.map(function(a){ return state.effectiveWeights[a.id] || 0; });
-  }
-  function polar(cx, cy, r, angleDeg){
-    var a = (angleDeg-90) * Math.PI/180;
-    return [cx + r*Math.cos(a), cy + r*Math.sin(a)];
-  }
-  function wheelSegments(){
-    var list = activeAes();
-    var eff = effectiveWeightsList();
-    var start = 0;
-    return list.map(function(a,i){
-      var slice = (eff[i]/100)*360;
-      if(slice<=0) slice = 0.001;
-      var seg = {ae:a, start:start, end:start+slice, color:colorFor(i)};
-      start += slice;
-      return seg;
-    });
+  // ---------- Ticker (next-up queue) ----------
+  function colorIndexForAe(id){
+    var idx = activeAes().findIndex(function(a){ return a.id===id; });
+    return idx===-1 ? 0 : idx;
   }
 
-  function renderWheel(){
-    var svg = document.getElementById("wheelSvg");
-    var segs = wheelSegments();
-    svg.innerHTML = "";
-    if(segs.length===0){
-      svg.innerHTML = '<circle cx="100" cy="100" r="92" fill="var(--surface-2)" stroke="var(--line)" stroke-width="2"/>';
+  function renderTicker(){
+    if(tickerAnimating) return;
+    var track = document.getElementById("tickerTrack");
+    var empty = document.getElementById("tickerEmpty");
+    var queue = state.nextQueue || [];
+    if(queue.length===0){
+      track.innerHTML = "";
+      empty.style.display = "block";
       return;
     }
-    var cx=100, cy=100, r=92;
-    segs.forEach(function(seg){
-      var p1 = polar(cx,cy,r,seg.start);
-      var p2 = polar(cx,cy,r,seg.end);
-      var largeArc = (seg.end-seg.start)>180 ? 1 : 0;
-      var path = document.createElementNS("http://www.w3.org/2000/svg","path");
-      var d = "M"+cx+","+cy+" L"+p1[0]+","+p1[1]+" A"+r+","+r+" 0 "+largeArc+" 1 "+p2[0]+","+p2[1]+" Z";
-      path.setAttribute("d", d);
-      path.setAttribute("fill", seg.color);
-      path.setAttribute("stroke", "var(--surface)");
-      path.setAttribute("stroke-width","1.5");
-      svg.appendChild(path);
-
-      var mid = (seg.start+seg.end)/2;
-      var labelPos = polar(cx,cy,r*0.62,mid);
-      var text = document.createElementNS("http://www.w3.org/2000/svg","text");
-      text.setAttribute("x", labelPos[0]);
-      text.setAttribute("y", labelPos[1]);
-      text.setAttribute("fill","#fff");
-      text.setAttribute("font-size","9.5");
-      text.setAttribute("font-weight","700");
-      text.setAttribute("text-anchor","middle");
-      text.setAttribute("dominant-baseline","middle");
-      text.setAttribute("transform","rotate("+mid+","+labelPos[0]+","+labelPos[1]+")");
-      text.textContent = seg.ae.name.split(" ")[0];
-      svg.appendChild(text);
-    });
-    var ring = document.createElementNS("http://www.w3.org/2000/svg","circle");
-    ring.setAttribute("cx",cx); ring.setAttribute("cy",cy); ring.setAttribute("r",r);
-    ring.setAttribute("fill","none"); ring.setAttribute("stroke","var(--line)"); ring.setAttribute("stroke-width","1");
-    svg.appendChild(ring);
+    empty.style.display = "none";
+    track.innerHTML = queue.map(function(item, i){
+      var cls = "ticker-chip q"+Math.min(i,3);
+      var color = colorFor(colorIndexForAe(item.id));
+      return '<div class="'+cls+'" style="background:'+color+'">'+escapeHtml(item.name.split(" ")[0])+'</div>';
+    }).join("");
   }
 
-  // ---------- Spin ----------
-  function updateSpinReady(){
-    var name = (document.getElementById("bdrNameInput").value || "").trim();
-    document.getElementById("spinBtn").disabled = spinning || activeAes().length===0 || name.length===0;
-  }
+  // Confetti-style burst centered on (x,y), relative to #tickerWrap.
+  function launchFireworks(x, y){
+    if(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    var canvas = document.getElementById("fireworksCanvas");
+    var wrap = document.getElementById("tickerWrap");
+    var dpr = window.devicePixelRatio || 1;
+    var w = wrap.clientWidth, h = wrap.clientHeight;
+    canvas.width = w*dpr; canvas.height = h*dpr;
+    canvas.style.width = w+"px"; canvas.style.height = h+"px";
+    var ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
 
-  function doSpin(){
-    if(spinning) return;
-    if(activeAes().length===0){
-      document.getElementById("resultSlot").innerHTML = '<div class="result-placeholder">Activate at least one AE in Admin first.</div>';
-      return;
-    }
-    var bdrName = (document.getElementById("bdrNameInput").value || "").trim();
-    if(!bdrName){
-      document.getElementById("bdrHint").textContent = "Enter your name before spinning.";
-      document.getElementById("bdrNameInput").focus();
-      return;
-    }
-    document.getElementById("bdrHint").textContent = "";
-    spinning = true;
-    document.getElementById("spinBtn").disabled = true;
-    document.getElementById("resultSlot").innerHTML = '<div class="result-placeholder">Spinning…</div>';
-
-    localStorage.setItem("rr_bdr_name", bdrName);
-
-    // Snapshot the wheel exactly as currently drawn so the animation lands on
-    // whatever the server actually picks (computed against the same weights).
-    var segsAtSpinTime = wheelSegments();
-
-    api("/api/spin", { method:"POST", body:{ bdrName: bdrName } }).then(function(res){
-      var seg = segsAtSpinTime.find(function(s){ return s.ae.id === res.winner.id; });
-      if(!seg){
-        // AE roster changed between snapshot and server pick (rare) — just show the result.
-        spinning = false;
-        document.getElementById("spinBtn").disabled = false;
-        fetchState().then(function(){ showResult(res.winner, bdrName, res.entry); });
-        return;
-      }
-      animateTo(seg, function(){
-        fetchState().then(function(){ showResult(res.winner, bdrName, res.entry); });
+    var count = 46;
+    var particles = [];
+    for(var i=0;i<count;i++){
+      var angle = (Math.PI*2*i/count) + (Math.random()*0.4 - 0.2);
+      var speed = 2.2 + Math.random()*2.6;
+      particles.push({
+        x:x, y:y,
+        vx: Math.cos(angle)*speed,
+        vy: Math.sin(angle)*speed - 1.2,
+        color: PALETTE[i % PALETTE.length]
       });
-    }).catch(function(err){
-      spinning = false;
-      document.getElementById("spinBtn").disabled = false;
-      document.getElementById("resultSlot").innerHTML = '<div class="result-placeholder">'+escapeHtml(err.message)+'</div>';
-    });
+    }
+
+    var start = null;
+    function frame(ts){
+      if(start===null) start = ts;
+      var elapsed = ts - start;
+      ctx.clearRect(0,0,w,h);
+      var life = Math.max(0, 1 - elapsed/FIREWORK_MS);
+      ctx.globalAlpha = life;
+      particles.forEach(function(p){
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.09;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 2.6, 0, Math.PI*2);
+        ctx.fill();
+      });
+      ctx.globalAlpha = 1;
+      if(elapsed < FIREWORK_MS) requestAnimationFrame(frame);
+      else ctx.clearRect(0,0,w,h);
+    }
+    requestAnimationFrame(frame);
   }
 
-  function animateTo(seg, done){
-    var jitter = (Math.random()*0.5 - 0.25) * (seg.end - seg.start) * 0.6;
-    var targetAngle = (seg.start + seg.end)/2 + jitter;
-    var extraTurns = 5;
-    var currentMod = ((currentRotation % 360) + 360) % 360;
-    var neededMod = ((360 - targetAngle) % 360 + 360) % 360;
-    var delta = ((neededMod - currentMod) % 360 + 360) % 360;
-    currentRotation += extraTurns*360 + delta;
+  // Slides the just-booked chip out, shifting the rest of the queue forward,
+  // then hands off to `done` (which re-fetches state and rebuilds the ticker
+  // fresh with the real next-up queue from the server).
+  function advanceTicker(done){
+    var track = document.getElementById("tickerTrack");
+    var wrap = document.getElementById("tickerWrap");
+    var firstChip = track.children[0];
 
-    var svg = document.getElementById("wheelSvg");
-    svg.style.transition = "transform "+SPIN_MS+"ms cubic-bezier(0.12, 0.72, 0.14, 1)";
-    svg.style.transform = "rotate("+currentRotation+"deg)";
+    if(firstChip){
+      var chipRect = firstChip.getBoundingClientRect();
+      var wrapRect = wrap.getBoundingClientRect();
+      launchFireworks(chipRect.left - wrapRect.left + chipRect.width/2, chipRect.top - wrapRect.top + chipRect.height/2);
+    } else {
+      launchFireworks(wrap.clientWidth/2, wrap.clientHeight/2);
+    }
+
+    var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if(!firstChip || reduceMotion){
+      done();
+      return;
+    }
+
+    tickerAnimating = true;
+    var gapPx = parseFloat(getComputedStyle(track).gap) || 14;
+    var shiftPx = firstChip.offsetWidth + gapPx;
+    track.style.transform = "translateX(-"+shiftPx+"px)";
 
     var finished = false;
     function onDone(){
       if(finished) return;
       finished = true;
-      svg.removeEventListener("transitionend", onDone);
+      track.removeEventListener("transitionend", onDone);
+      track.style.transition = "none";
+      track.style.transform = "none";
+      tickerAnimating = false;
+      requestAnimationFrame(function(){ track.style.transition = ""; });
       done();
     }
-    svg.addEventListener("transitionend", onDone);
-    setTimeout(onDone, SPIN_MS + 150);
+    track.addEventListener("transitionend", onDone);
+    setTimeout(onDone, BOOK_ANIM_MS + 150);
+  }
+
+  // ---------- Book meeting ----------
+  function updateSpinReady(){
+    var name = (document.getElementById("bdrNameInput").value || "").trim();
+    var queue = state.nextQueue || [];
+    document.getElementById("spinBtn").disabled = booking || queue.length===0 || name.length===0;
+  }
+
+  function doSpin(){
+    if(booking) return;
+    if((state.nextQueue||[]).length===0){
+      document.getElementById("resultSlot").innerHTML = '<div class="result-placeholder">Activate at least one AE in Admin first.</div>';
+      return;
+    }
+    var bdrName = (document.getElementById("bdrNameInput").value || "").trim();
+    if(!bdrName){
+      document.getElementById("bdrHint").textContent = "Enter your name before booking.";
+      document.getElementById("bdrNameInput").focus();
+      return;
+    }
+    document.getElementById("bdrHint").textContent = "";
+    booking = true;
+    document.getElementById("spinBtn").disabled = true;
+    document.getElementById("resultSlot").innerHTML = '<div class="result-placeholder">Booking…</div>';
+
+    localStorage.setItem("rr_bdr_name", bdrName);
+
+    api("/api/spin", { method:"POST", body:{ bdrName: bdrName } }).then(function(res){
+      advanceTicker(function(){
+        fetchState().then(function(){ showResult(res.winner, bdrName, res.entry); });
+      });
+    }).catch(function(err){
+      booking = false;
+      document.getElementById("spinBtn").disabled = false;
+      document.getElementById("resultSlot").innerHTML = '<div class="result-placeholder">'+escapeHtml(err.message)+'</div>';
+    });
   }
 
   function showResult(winner, bdrName, entry){
@@ -208,7 +225,7 @@
         .then(fetchState);
     });
     quickInput.focus();
-    spinning = false;
+    booking = false;
     updateSpinReady();
   }
 
@@ -432,7 +449,7 @@
   }
 
   function render(){
-    renderWheel();
+    renderTicker();
     renderLog();
     renderStats();
     renderAdmin();
