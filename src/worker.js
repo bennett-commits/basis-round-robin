@@ -1,7 +1,7 @@
 import {
   loadState, saveState, activeAes, findAe, findLogEntry,
   overallHoldRate, effectiveWeights, pickNextAe, previewQueue, newId,
-  json, requireAdmin, requireSyncToken, PAST_DISCOVERY_STAGES
+  json, requireAdmin, requireSyncToken, PAST_DISCOVERY_STAGES, POOLS
 } from "./lib/state.js";
 
 async function readJson(request) {
@@ -9,20 +9,32 @@ async function readJson(request) {
   catch (e) { return null; }
 }
 
+function normalizePool(value) {
+  return POOLS.includes(value) ? value : "core";
+}
+
 const PREVIEW_QUEUE_LENGTH = 4; // 1 next-up + 3 on-deck
 
 const routes = {
   "GET /api/state": async ({ env }) => {
     const state = await loadState(env);
-    const eff = effectiveWeights(state);
-    const act = activeAes(state);
-    const effByAeId = {};
-    act.forEach((a, i) => { effByAeId[a.id] = eff[i]; });
+    const effectiveWeightsByPool = {};
+    const nextQueueByPool = {};
+    const overallHoldRateByPool = {};
+    POOLS.forEach(pool => {
+      const eff = effectiveWeights(state, pool);
+      const act = activeAes(state, pool);
+      const map = {};
+      act.forEach((a, i) => { map[a.id] = eff[i]; });
+      effectiveWeightsByPool[pool] = map;
+      nextQueueByPool[pool] = previewQueue(state, pool, PREVIEW_QUEUE_LENGTH);
+      overallHoldRateByPool[pool] = overallHoldRate(state, pool);
+    });
     return json({
       ...state,
-      effectiveWeights: effByAeId,
-      overallHoldRate: overallHoldRate(state),
-      nextQueue: previewQueue(state, PREVIEW_QUEUE_LENGTH)
+      effectiveWeights: effectiveWeightsByPool,
+      overallHoldRate: overallHoldRateByPool,
+      nextQueue: nextQueueByPool
     });
   },
 
@@ -30,15 +42,16 @@ const routes = {
     const body = await readJson(request);
     if (!body) return json({ error: "Invalid JSON body" }, { status: 400 });
     const bdrName = String(body.bdrName || "").trim();
+    const pool = normalizePool(body.pool);
     if (!bdrName) return json({ error: "bdrName is required" }, { status: 400 });
 
     const state = await loadState(env);
-    const winner = pickNextAe(state);
-    if (!winner) return json({ error: "No active AEs configured" }, { status: 409 });
+    const winner = pickNextAe(state, pool);
+    if (!winner) return json({ error: "No active AEs configured for this pool" }, { status: 409 });
 
     winner.bookedRR += 1;
     const entry = {
-      id: newId("log"), aeId: winner.id, name: winner.name, bdrName,
+      id: newId("log"), aeId: winner.id, name: winner.name, bdrName, pool,
       accountName: "", held: false, lost: false, flagged: false,
       oppId: null, oppName: null, oppStage: null,
       ts: new Date().toISOString()
@@ -99,7 +112,8 @@ const routes = {
     if (body.action === "add") {
       const name = String(body.name || "").trim();
       if (!name) return json({ error: "name is required" }, { status: 400 });
-      const ae = { id: newId("ae"), name, active: true, weight: 20, bookedRR: 0, heldRR: 0, totalHeld30d: 0 };
+      const pool = normalizePool(body.pool);
+      const ae = { id: newId("ae"), name, pool, active: true, weight: 20, bookedRR: 0, heldRR: 0, totalHeld30d: 0 };
       state.aes.push(ae);
       await saveState(env, state);
       return json({ ae });
@@ -127,8 +141,9 @@ const routes = {
     if (unauthorized) return unauthorized;
     const body = await readJson(request);
     if (!body) return json({ error: "Invalid JSON body" }, { status: 400 });
+    const pool = normalizePool(body.pool);
     const state = await loadState(env);
-    state.factorHoldRate = !!body.value;
+    state.factorHoldRate[pool] = !!body.value;
     await saveState(env, state);
     return json({ factorHoldRate: state.factorHoldRate });
   },

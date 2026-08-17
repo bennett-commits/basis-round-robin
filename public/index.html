@@ -22,6 +22,7 @@
 
   <nav class="tabs" role="tablist" id="tabsNav">
     <button class="tab active" data-view="spin" role="tab">Spin</button>
+    <button class="tab" data-view="ramping" role="tab">Ramping Reps</button>
   </nav>
 
   <!-- ADMIN PASSWORD GATE -->
@@ -38,7 +39,7 @@
     </div>
   </div>
 
-  <!-- SPIN VIEW -->
+  <!-- CORE SPIN VIEW -->
   <section class="view active" id="view-spin">
     <div class="spin-layout">
       <div class="wheel-card">
@@ -80,10 +81,52 @@
     <div class="stat-strip" id="statStrip"></div>
   </section>
 
+  <!-- RAMPING REPS SPIN VIEW -->
+  <section class="view" id="view-ramping">
+    <div class="spin-layout">
+      <div class="wheel-card">
+        <div class="reel-eyebrow">Next up</div>
+        <div class="reel-wrap" id="reelWrapRamping">
+          <div class="reel-window">
+            <div class="reel-track" id="reelTrackRamping"></div>
+          </div>
+          <div class="reel-empty" id="reelEmptyRamping">Activate at least one ramping rep in Admin first.</div>
+        </div>
+        <div class="reel-fullname" id="reelFullNameRamping"></div>
+        <div class="bdr-field">
+          <label for="bdrNameInputRamping">Booking as</label>
+          <input type="text" id="bdrNameInputRamping" placeholder="Your name" list="bdrSuggestionsRamping" autocomplete="off" />
+          <datalist id="bdrSuggestionsRamping"></datalist>
+          <div class="bdr-hint" id="bdrHintRamping"></div>
+        </div>
+        <button class="spin-btn" id="spinBtnRamping">Book meeting</button>
+        <div class="result-slot" id="resultSlotRamping">
+          <div class="result-placeholder">Enter your name, then book to assign the next inbound deal.</div>
+        </div>
+      </div>
+
+      <div class="log-card">
+        <h2>Recent assignments</h2>
+        <p class="log-sub">Separate rotation from the core AE pool — shared live across everyone on this page. Add the account name once it's booked — the hourly Salesforce sync links it to an opp and updates status automatically. Spun by accident? Press 🚩 to flag it for an admin to clear.</p>
+        <div class="ae-table-wrap" style="box-shadow:none;">
+          <table class="ae-table" style="min-width:620px;">
+            <thead>
+              <tr><th>Time</th><th>BDR</th><th>AE</th><th>Account name</th><th>Status</th><th></th></tr>
+            </thead>
+            <tbody id="logRowsRamping"></tbody>
+          </table>
+        </div>
+        <div class="empty-log" id="emptyLogRamping">No assignments yet.</div>
+      </div>
+    </div>
+
+    <div class="stat-strip" id="statStripRamping"></div>
+  </section>
+
   <!-- ADMIN VIEW -->
   <section class="view" id="view-admin">
     <div class="admin-toolbar">
-      <h2>Roster &amp; weighting</h2>
+      <h2>Core AE roster &amp; weighting</h2>
       <div class="add-ae">
         <input type="text" id="newAeName" placeholder="New AE name" />
         <button class="btn-secondary" id="addAeBtn">Add AE</button>
@@ -115,20 +158,53 @@
     </div>
     <div class="weight-sum-warning" id="weightWarning" style="display:none;"></div>
 
+    <div class="admin-toolbar" style="margin-top:34px;">
+      <h2>Ramping Reps roster &amp; weighting</h2>
+      <div class="add-ae">
+        <input type="text" id="newAeNameRamping" placeholder="New ramping rep name" />
+        <button class="btn-secondary" id="addAeBtnRamping">Add rep</button>
+      </div>
+    </div>
+
+    <div class="toggle-row" style="margin-bottom:16px; width:fit-content;">
+      <div class="switch"><input type="checkbox" id="factorHoldToggleRamping" /><span class="slider-track"></span></div>
+      <label for="factorHoldToggleRamping"><b>Factor hold rate into weighting</b> — same logic as the core pool, computed separately within the Ramping Reps roster only.</label>
+    </div>
+
+    <div class="ae-table-wrap">
+      <table class="ae-table">
+        <thead>
+          <tr>
+            <th>In RR</th>
+            <th>AE</th>
+            <th>Target weight</th>
+            <th>Booked (RR)</th>
+            <th>Held (RR)</th>
+            <th>Hold rate</th>
+            <th>Held, all sources (30d)</th>
+            <th>Effective weight</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="aeTableBodyRamping"></tbody>
+      </table>
+    </div>
+    <div class="weight-sum-warning" id="weightWarningRamping" style="display:none;"></div>
+
     <p class="admin-footnote">
-      <b>Target weight</b> is the % share of round-robin deals an AE should receive; the spinner uses deficit-based fair queueing so actual assignments converge to these targets over many spins rather than drifting with short-run randomness.
+      <b>Target weight</b> is the % share of round-robin deals an AE should receive within their own pool; the spinner uses deficit-based fair queueing so actual assignments converge to these targets over many spins rather than drifting with short-run randomness. The Core and Ramping Reps pools are weighted completely independently — booking in one never affects the other's queue.
       <b>Booked / Held (RR)</b> counts only deals assigned <i>through this tool</i>. Booking increments automatically on each spin; Held increments automatically once the hourly Salesforce sync sees the linked opp reach Discovery — there's no manual override, since self-reported "held" status defeats the point of weighting off real Salesforce data.
-      <b>Held, all sources (30d)</b> is informational only — every Opportunity that reached Discovery in the trailing 30 days, regardless of how it was booked — and is never factored into assignment. Refreshed automatically every hour. Last synced: <span id="sfPullDateLabel">—</span>.
+      <b>Held, all sources (30d)</b> is informational only — every Opportunity that reached Discovery in the trailing 30 days, regardless of how it was booked — and is never factored into assignment. Refreshed automatically every hour for both pools. Last synced: <span id="sfPullDateLabel">—</span>.
     </p>
 
     <div class="admin-toolbar" style="margin-top:30px;">
       <h2>Flagged for review</h2>
     </div>
-    <p class="log-sub" style="margin:-4px 0 12px;">BDRs flag a spin with 🚩 when it was a false click. Clearing it removes the assignment entirely and rolls back that AE's Booked/Held (RR) counts by one.</p>
+    <p class="log-sub" style="margin:-4px 0 12px;">BDRs flag a spin with 🚩 when it was a false click, from either pool. Clearing it removes the assignment entirely and rolls back that AE's Booked/Held (RR) counts by one.</p>
     <div class="ae-table-wrap">
-      <table class="ae-table" style="min-width:760px;">
+      <table class="ae-table" style="min-width:820px;">
         <thead>
-          <tr><th>Time</th><th>BDR</th><th>AE</th><th>Account name</th><th>Status</th><th></th></tr>
+          <tr><th>Time</th><th>Pool</th><th>BDR</th><th>AE</th><th>Account name</th><th>Status</th><th></th></tr>
         </thead>
         <tbody id="flaggedLogBody"></tbody>
       </table>
@@ -138,11 +214,11 @@
     <div class="admin-toolbar" style="margin-top:30px;">
       <h2>Assignment log</h2>
     </div>
-    <p class="log-sub" style="margin:-4px 0 12px;">Deleting an assignment removes it from the log and rolls back that AE's Booked/Held (RR) counts by one.</p>
+    <p class="log-sub" style="margin:-4px 0 12px;">Both pools together. Deleting an assignment removes it from the log and rolls back that AE's Booked/Held (RR) counts by one.</p>
     <div class="ae-table-wrap">
-      <table class="ae-table" style="min-width:760px;">
+      <table class="ae-table" style="min-width:820px;">
         <thead>
-          <tr><th>Time</th><th>BDR</th><th>AE</th><th>Account name</th><th>Status</th><th></th></tr>
+          <tr><th>Time</th><th>Pool</th><th>BDR</th><th>AE</th><th>Account name</th><th>Status</th><th></th></tr>
         </thead>
         <tbody id="adminLogBody"></tbody>
       </table>

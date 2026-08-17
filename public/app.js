@@ -3,17 +3,37 @@
   var PALETTE = ["#2F6F5E","#B8863B","#5B7FB0","#A65E8C","#6B8E4E","#B4483F","#3F8FA0","#8C6B3F"];
   var POLL_MS = 4000;
   var FIREWORK_MS = 1700;
+  var POOLS = ["core", "ramping"];
 
-  var state = { factorHoldRate:false, sfPullDate:null, aes:[], log:[], effectiveWeights:{}, overallHoldRate:null, nextQueue:[] };
-  var booking = false;
-  var reelAnimating = false;
+  // Maps each pool to its own set of DOM element ids, so every render/handler
+  // function below just takes a `pool` argument instead of being duplicated.
+  var POOL_UI = {
+    core: {
+      reelWrap:"reelWrap", reelTrack:"reelTrack", reelEmpty:"reelEmpty", reelFullName:"reelFullName",
+      bdrInput:"bdrNameInput", bdrHint:"bdrHint", bdrSuggestions:"bdrSuggestions",
+      spinBtn:"spinBtn", resultSlot:"resultSlot",
+      logRows:"logRows", emptyLog:"emptyLog", statStrip:"statStrip",
+      tableBody:"aeTableBody", weightWarning:"weightWarning", factorToggle:"factorHoldToggle",
+      newAeName:"newAeName", addAeBtn:"addAeBtn"
+    },
+    ramping: {
+      reelWrap:"reelWrapRamping", reelTrack:"reelTrackRamping", reelEmpty:"reelEmptyRamping", reelFullName:"reelFullNameRamping",
+      bdrInput:"bdrNameInputRamping", bdrHint:"bdrHintRamping", bdrSuggestions:"bdrSuggestionsRamping",
+      spinBtn:"spinBtnRamping", resultSlot:"resultSlotRamping",
+      logRows:"logRowsRamping", emptyLog:"emptyLogRamping", statStrip:"statStripRamping",
+      tableBody:"aeTableBodyRamping", weightWarning:"weightWarningRamping", factorToggle:"factorHoldToggleRamping",
+      newAeName:"newAeNameRamping", addAeBtn:"addAeBtnRamping"
+    }
+  };
+
+  var state = { factorHoldRate:{core:false,ramping:false}, sfPullDate:null, aes:[], log:[], effectiveWeights:{core:{},ramping:{}}, overallHoldRate:{core:null,ramping:null}, nextQueue:{core:[],ramping:[]} };
+  var booking = { core:false, ramping:false };
+  var reelAnimating = { core:false, ramping:false };
   var adminPassword = sessionStorage.getItem("rr_admin_password") || null;
   var pollTimer = null;
 
   function colorFor(idx){ return PALETTE[idx % PALETTE.length]; }
-  function activeAes(){ return state.aes.filter(function(a){ return a.active; }); }
-  function findAe(id){ return state.aes.find(function(a){ return a.id===id; }); }
-  function findLogEntry(id){ return state.log.find(function(e){ return e.id===id; }); }
+  function activeAes(pool){ return state.aes.filter(function(a){ return a.active && a.pool===pool; }); }
 
   function escapeHtml(s){
     return String(s).replace(/[&<>"']/g, function(c){
@@ -65,17 +85,18 @@
   // ---------- Reel (next-up queue) ----------
   var ROW_STEP = 80; // 70px row + 10px gap — must match .reel-row/.reel-track CSS
 
-  function colorIndexForAe(id){
-    var idx = activeAes().findIndex(function(a){ return a.id===id; });
+  function colorIndexForAe(id, pool){
+    var idx = activeAes(pool).findIndex(function(a){ return a.id===id; });
     return idx===-1 ? 0 : idx;
   }
 
-  function renderReel(){
-    if(reelAnimating) return;
-    var track = document.getElementById("reelTrack");
-    var empty = document.getElementById("reelEmpty");
-    var fullName = document.getElementById("reelFullName");
-    var queue = state.nextQueue || [];
+  function renderReel(pool){
+    if(reelAnimating[pool]) return;
+    var ui = POOL_UI[pool];
+    var track = document.getElementById(ui.reelTrack);
+    var empty = document.getElementById(ui.reelEmpty);
+    var fullName = document.getElementById(ui.reelFullName);
+    var queue = (state.nextQueue && state.nextQueue[pool]) || [];
     track.style.transform = "translateY(0)";
     if(queue.length===0){
       track.innerHTML = "";
@@ -87,13 +108,14 @@
     fullName.textContent = queue[0].name;
     track.innerHTML = queue.slice(0,2).map(function(item, i){
       var cls = "reel-row q"+i;
-      var color = colorFor(colorIndexForAe(item.id));
+      var color = colorFor(colorIndexForAe(item.id, pool));
       return '<div class="'+cls+'" style="background:'+color+'">'+escapeHtml(item.name.split(" ")[0])+'</div>';
     }).join("");
   }
 
   // Big multi-burst confetti/fireworks show, full viewport — deliberately not
-  // confined to the reel box so it actually reads as a celebration.
+  // confined to the reel box so it actually reads as a celebration. Shared
+  // across both pools; only the origin point differs.
   function launchFireworks(originX, originY){
     if(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     var canvas = document.getElementById("fireworksCanvas");
@@ -161,15 +183,12 @@
     requestAnimationFrame(frame);
   }
 
-  // Spins the reel through a few loops of the roster, landing precisely on
-  // `winner` (already the real, server-confirmed pick), then bursts fireworks
-  // at the moment it lands. Purely a celebratory reveal — the outcome is
-  // already decided, this is just how it's shown.
   // Fireworks celebrate the booking that just happened first, then the reel
   // makes one simple step up to reveal who's next — no roulette-style spin.
-  function playReelSpin(winner, done){
-    var track = document.getElementById("reelTrack");
-    var wrap = document.getElementById("reelWrap");
+  function playReelSpin(pool, winner, done){
+    var ui = POOL_UI[pool];
+    var track = document.getElementById(ui.reelTrack);
+    var wrap = document.getElementById(ui.reelWrap);
     var wrapRect = wrap.getBoundingClientRect();
     var landingX = wrapRect.left + wrapRect.width/2;
     var landingY = wrapRect.top + 35; // current row is 70px tall, centered ~35px from window top
@@ -183,7 +202,7 @@
       return;
     }
 
-    reelAnimating = true;
+    reelAnimating[pool] = true;
     var shiftMs = 550;
     var celebrateDelayMs = 450; // let the fireworks land on the just-booked name before advancing
 
@@ -203,7 +222,7 @@
       track.removeEventListener("transitionend", onDone);
       track.style.transition = "none";
       track.style.transform = "translateY(0px)";
-      reelAnimating = false;
+      reelAnimating[pool] = false;
       requestAnimationFrame(function(){ track.style.transition = ""; });
       done();
     }
@@ -212,53 +231,56 @@
   }
 
   // ---------- Book meeting ----------
-  function updateSpinReady(){
-    var name = (document.getElementById("bdrNameInput").value || "").trim();
-    var queue = state.nextQueue || [];
-    document.getElementById("spinBtn").disabled = booking || queue.length===0 || name.length===0;
+  function updateSpinReady(pool){
+    var ui = POOL_UI[pool];
+    var name = (document.getElementById(ui.bdrInput).value || "").trim();
+    var queue = (state.nextQueue && state.nextQueue[pool]) || [];
+    document.getElementById(ui.spinBtn).disabled = booking[pool] || queue.length===0 || name.length===0;
   }
 
-  function doSpin(){
-    if(booking) return;
-    if((state.nextQueue||[]).length===0){
-      document.getElementById("resultSlot").innerHTML = '<div class="result-placeholder">Activate at least one AE in Admin first.</div>';
+  function doSpin(pool){
+    if(booking[pool]) return;
+    var ui = POOL_UI[pool];
+    if(((state.nextQueue && state.nextQueue[pool]) || []).length===0){
+      document.getElementById(ui.resultSlot).innerHTML = '<div class="result-placeholder">Activate at least one AE in Admin first.</div>';
       return;
     }
-    var bdrName = (document.getElementById("bdrNameInput").value || "").trim();
+    var bdrName = (document.getElementById(ui.bdrInput).value || "").trim();
     if(!bdrName){
-      document.getElementById("bdrHint").textContent = "Enter your name before booking.";
-      document.getElementById("bdrNameInput").focus();
+      document.getElementById(ui.bdrHint).textContent = "Enter your name before booking.";
+      document.getElementById(ui.bdrInput).focus();
       return;
     }
-    document.getElementById("bdrHint").textContent = "";
-    booking = true;
-    document.getElementById("spinBtn").disabled = true;
-    document.getElementById("resultSlot").innerHTML = '<div class="result-placeholder">Booking…</div>';
+    document.getElementById(ui.bdrHint).textContent = "";
+    booking[pool] = true;
+    document.getElementById(ui.spinBtn).disabled = true;
+    document.getElementById(ui.resultSlot).innerHTML = '<div class="result-placeholder">Booking…</div>';
 
     localStorage.setItem("rr_bdr_name", bdrName);
 
-    api("/api/spin", { method:"POST", body:{ bdrName: bdrName } }).then(function(res){
-      playReelSpin(res.winner, function(){
-        fetchState().then(function(){ showResult(res.entry); });
+    api("/api/spin", { method:"POST", body:{ bdrName: bdrName, pool: pool } }).then(function(res){
+      playReelSpin(pool, res.winner, function(){
+        fetchState().then(function(){ showResult(pool, res.entry); });
       });
     }).catch(function(err){
-      booking = false;
-      document.getElementById("spinBtn").disabled = false;
-      document.getElementById("resultSlot").innerHTML = '<div class="result-placeholder">'+escapeHtml(err.message)+'</div>';
+      booking[pool] = false;
+      document.getElementById(ui.spinBtn).disabled = false;
+      document.getElementById(ui.resultSlot).innerHTML = '<div class="result-placeholder">'+escapeHtml(err.message)+'</div>';
     });
   }
 
-  function showResult(entry){
-    document.getElementById("resultSlot").innerHTML =
-      '<div class="result-account-quickadd"><input type="text" id="quickAccountInput" placeholder="Account name (optional)" /></div>';
-    var quickInput = document.getElementById("quickAccountInput");
+  function showResult(pool, entry){
+    var ui = POOL_UI[pool];
+    document.getElementById(ui.resultSlot).innerHTML =
+      '<div class="result-account-quickadd"><input type="text" id="quickAccountInput'+pool+'" placeholder="Account name (optional)" /></div>';
+    var quickInput = document.getElementById("quickAccountInput"+pool);
     quickInput.addEventListener("change", function(){
       api("/api/log/account", { method:"POST", body:{ id: entry.id, accountName: quickInput.value.trim() } })
         .then(fetchState);
     });
     quickInput.focus();
-    booking = false;
-    updateSpinReady();
+    booking[pool] = false;
+    updateSpinReady(pool);
   }
 
   // ---------- Log rendering ----------
@@ -282,8 +304,12 @@
       actions += ' <button class="remove-btn" data-action="delete-log" data-id="'+entry.id+'" title="'+(opts.clearLabel||'Delete assignment')+'">'+(opts.clearLabel?opts.clearLabel:'✕')+'</button>';
     }
     var ts = new Date(entry.ts).toLocaleString([], { month:"short", day:"numeric", hour:"numeric", minute:"2-digit" });
+    var poolCell = opts.showPool
+      ? '<td class="hold-rate">'+(entry.pool==="ramping" ? "Ramping" : "Core")+'</td>'
+      : "";
     return (
       '<td class="hold-rate">'+escapeHtml(ts)+'</td>' +
+      poolCell +
       '<td>'+escapeHtml(entry.bdrName || "—")+'</td>' +
       '<td class="log-name" style="font-weight:600;">'+escapeHtml(entry.name)+'</td>' +
       '<td><input type="text" class="num-input account-input" placeholder="Account name" value="'+escapeHtml(entry.accountName || "")+'" data-action="account-name" data-id="'+entry.id+'"/>'+oppNote+'</td>' +
@@ -320,14 +346,16 @@
     return active.type !== "checkbox" && active.type !== "range";
   }
 
-  function renderLog(){
-    var container = document.getElementById("logRows");
+  function renderLog(pool){
+    var ui = POOL_UI[pool];
+    var container = document.getElementById(ui.logRows);
     if(isEditing(container)) return; // don't yank focus out from under a typing BDR
-    var empty = document.getElementById("emptyLog");
+    var empty = document.getElementById(ui.emptyLog);
+    var entries = state.log.filter(function(e){ return e.pool===pool; });
     container.innerHTML = "";
-    if(state.log.length===0){ empty.style.display="block"; return; }
+    if(entries.length===0){ empty.style.display="block"; return; }
     empty.style.display="none";
-    state.log.slice(0,20).forEach(function(entry){
+    entries.slice(0,20).forEach(function(entry){
       var tr = document.createElement("tr");
       tr.innerHTML = logRowHtml(entry, {showDelete:false});
       container.appendChild(tr);
@@ -344,7 +372,7 @@
     empty.style.display = "none";
     state.log.forEach(function(entry){
       var tr = document.createElement("tr");
-      tr.innerHTML = logRowHtml(entry, {showDelete:true});
+      tr.innerHTML = logRowHtml(entry, {showDelete:true, showPool:true});
       container.appendChild(tr);
     });
     attachLogRowHandlers(container);
@@ -360,22 +388,26 @@
     empty.style.display = "none";
     flagged.forEach(function(entry){
       var tr = document.createElement("tr");
-      tr.innerHTML = logRowHtml(entry, {showDelete:true, clearLabel:"Clear"});
+      tr.innerHTML = logRowHtml(entry, {showDelete:true, clearLabel:"Clear", showPool:true});
       container.appendChild(tr);
     });
     attachLogRowHandlers(container);
   }
 
   function renderBdrSuggestions(){
-    var dl = document.getElementById("bdrSuggestions");
     var names = Array.from(new Set(state.log.map(function(e){ return e.bdrName; }).filter(Boolean)));
-    dl.innerHTML = names.map(function(n){ return '<option value="'+escapeHtml(n)+'"></option>'; }).join("");
+    var optionsHtml = names.map(function(n){ return '<option value="'+escapeHtml(n)+'"></option>'; }).join("");
+    POOLS.forEach(function(pool){
+      var dl = document.getElementById(POOL_UI[pool].bdrSuggestions);
+      if(dl) dl.innerHTML = optionsHtml;
+    });
   }
 
   // ---------- Stat strip ----------
-  function renderStats(){
-    var strip = document.getElementById("statStrip");
-    var list = activeAes();
+  function renderStats(pool){
+    var ui = POOL_UI[pool];
+    var strip = document.getElementById(ui.statStrip);
+    var list = activeAes(pool);
     strip.innerHTML = "";
     list.forEach(function(a,i){
       var rate = a.bookedRR>0 ? Math.round((a.heldRR/a.bookedRR)*100) : null;
@@ -387,20 +419,30 @@
         '<div style="font-size:12px; color:var(--ink-soft); margin-top:2px;">'+(rate===null?'—':rate+'%')+' hold rate via RR · '+a.totalHeld30d+' held all sources (30d)</div>';
       strip.appendChild(tile);
     });
+  }
+
+  function renderHeaderSummary(){
+    var coreCount = activeAes("core").length;
+    var rampingCount = activeAes("ramping").length;
+    var total = coreCount + rampingCount;
     var quick = document.getElementById("quickStat");
-    quick.textContent = list.length===0 ? "No active AEs configured" : list.length+" AE"+(list.length>1?"s":"")+" active · "+state.log.length+" assigned total · live";
+    quick.textContent = total===0
+      ? "No active AEs configured"
+      : total+" AE"+(total>1?"s":"")+" active ("+coreCount+" core, "+rampingCount+" ramping) · "+state.log.length+" assigned total · live";
   }
 
   // ---------- Admin table ----------
-  function renderAdmin(){
-    var body = document.getElementById("aeTableBody");
+  function renderAdmin(pool){
+    var ui = POOL_UI[pool];
+    var body = document.getElementById(ui.tableBody);
     if(!body || isEditing(body)) return;
     body.innerHTML = "";
-    var actList = activeAes();
-    var overall = state.overallHoldRate;
+    var poolAes = state.aes.filter(function(a){ return a.pool===pool; });
+    var actList = activeAes(pool);
+    var overall = state.overallHoldRate[pool];
 
     var weightSumActive = actList.reduce(function(s,a){ return s + Math.max(0,a.weight); }, 0);
-    var warn = document.getElementById("weightWarning");
+    var warn = document.getElementById(ui.weightWarning);
     if(actList.length>0 && Math.abs(weightSumActive-100) > 0.5){
       warn.style.display = "block";
       warn.textContent = "Active target weights sum to "+Math.round(weightSumActive)+"%, not 100% — the wheel will still normalize proportionally, but consider rebalancing.";
@@ -408,7 +450,7 @@
       warn.style.display = "none";
     }
 
-    state.aes.forEach(function(a, idx){
+    poolAes.forEach(function(a, idx){
       var tr = document.createElement("tr");
       if(!a.active) tr.className = "inactive";
       var rate = a.bookedRR>0 ? (a.heldRR/a.bookedRR) : null;
@@ -417,7 +459,7 @@
         if(rate >= overall*1.1) rateClass = "high";
         else if(rate <= overall*0.9) rateClass = "low";
       }
-      var effVal = a.active ? state.effectiveWeights[a.id] : null;
+      var effVal = a.active ? state.effectiveWeights[pool][a.id] : null;
 
       tr.innerHTML =
         '<td><div class="switch"><input type="checkbox" '+(a.active?'checked':'')+' data-action="toggle-active" data-id="'+a.id+'"/><span class="slider-track"></span></div></td>' +
@@ -432,7 +474,7 @@
         '<td class="hold-rate '+rateClass+'">'+(rate===null?'—':Math.round(rate*100)+'%')+'</td>' +
         '<td><input type="number" min="0" class="num-input" value="'+a.totalHeld30d+'" data-action="totalHeld30d" data-id="'+a.id+'"/></td>' +
         '<td class="eff-weight">'+(effVal==null?'—':effVal.toFixed(1)+'%')+'</td>' +
-        '<td><button class="remove-btn" data-action="remove" data-id="'+a.id+'" title="Remove AE">✕</button></td>';
+        '<td><button class="remove-btn" data-action="remove" data-id="'+a.id+'" title="Remove">✕</button></td>';
       body.appendChild(tr);
     });
 
@@ -475,30 +517,31 @@
       });
     });
 
-    document.getElementById("factorHoldToggle").checked = !!state.factorHoldRate;
-    var pullLabel = document.getElementById("sfPullDateLabel");
-    if(pullLabel) pullLabel.textContent = state.sfPullDate ? new Date(state.sfPullDate).toLocaleString() : "never yet";
+    document.getElementById(ui.factorToggle).checked = !!state.factorHoldRate[pool];
   }
 
   function render(){
-    renderReel();
-    renderLog();
-    renderStats();
-    renderAdmin();
+    POOLS.forEach(function(pool){
+      renderReel(pool);
+      renderLog(pool);
+      renderStats(pool);
+      renderAdmin(pool);
+      updateSpinReady(pool);
+    });
     renderAdminLog();
     renderFlaggedReview();
     renderBdrSuggestions();
-    updateSpinReady();
+    renderHeaderSummary();
+    var pullLabel = document.getElementById("sfPullDateLabel");
+    if(pullLabel) pullLabel.textContent = state.sfPullDate ? new Date(state.sfPullDate).toLocaleString() : "never yet";
   }
 
   // ---------- View switching ----------
   function setView(name){
     document.querySelectorAll(".tab").forEach(function(t){ t.classList.remove("active"); });
     document.querySelectorAll(".view").forEach(function(v){ v.classList.remove("active"); });
-    if(name === "spin"){
-      var spinTab = document.querySelector('.tab[data-view="spin"]');
-      if(spinTab) spinTab.classList.add("active");
-    }
+    var tab = document.querySelector('.tab[data-view="'+name+'"]');
+    if(tab) tab.classList.add("active");
     document.getElementById("view-"+name).classList.add("active");
   }
   document.querySelectorAll(".tab").forEach(function(tab){
@@ -544,30 +587,42 @@
   }
 
   // ---------- BDR identity (per-device convenience only, not shared state) ----------
-  var bdrInput = document.getElementById("bdrNameInput");
-  bdrInput.value = localStorage.getItem("rr_bdr_name") || "";
-  bdrInput.addEventListener("input", function(){
-    document.getElementById("bdrHint").textContent = "";
-    updateSpinReady();
-  });
-
-  document.getElementById("spinBtn").addEventListener("click", doSpin);
-
-  document.getElementById("addAeBtn").addEventListener("click", function(){
-    var input = document.getElementById("newAeName");
-    var name = input.value.trim();
-    if(!name) return;
-    adminApi("/api/admin/ae", { method:"POST", body:{ action:"add", name: name } }).then(function(){
-      input.value = "";
-      fetchState();
+  // Same person books in either pool, so both name fields stay in sync live.
+  POOLS.forEach(function(pool){
+    var ui = POOL_UI[pool];
+    var input = document.getElementById(ui.bdrInput);
+    input.value = localStorage.getItem("rr_bdr_name") || "";
+    input.addEventListener("input", function(){
+      document.getElementById(ui.bdrHint).textContent = "";
+      localStorage.setItem("rr_bdr_name", input.value);
+      updateSpinReady(pool);
+      POOLS.forEach(function(otherPool){
+        if(otherPool===pool) return;
+        var otherInput = document.getElementById(POOL_UI[otherPool].bdrInput);
+        if(document.activeElement !== otherInput) otherInput.value = input.value;
+      });
     });
   });
-  document.getElementById("newAeName").addEventListener("keydown", function(e){
-    if(e.key==="Enter") document.getElementById("addAeBtn").click();
-  });
 
-  document.getElementById("factorHoldToggle").addEventListener("change", function(e){
-    adminApi("/api/admin/factor-hold", { method:"POST", body:{ value: e.target.checked } }).then(fetchState);
+  POOLS.forEach(function(pool){
+    var ui = POOL_UI[pool];
+    document.getElementById(ui.spinBtn).addEventListener("click", function(){ doSpin(pool); });
+
+    var addBtn = document.getElementById(ui.addAeBtn);
+    var nameInput = document.getElementById(ui.newAeName);
+    addBtn.addEventListener("click", function(){
+      var name = nameInput.value.trim();
+      if(!name) return;
+      adminApi("/api/admin/ae", { method:"POST", body:{ action:"add", name:name, pool:pool } }).then(function(){
+        nameInput.value = "";
+        fetchState();
+      });
+    });
+    nameInput.addEventListener("keydown", function(e){ if(e.key==="Enter") addBtn.click(); });
+
+    document.getElementById(ui.factorToggle).addEventListener("change", function(e){
+      adminApi("/api/admin/factor-hold", { method:"POST", body:{ pool:pool, value: e.target.checked } }).then(fetchState);
+    });
   });
 
   if(adminPassword) document.getElementById("adminBtn").classList.add("unlocked");
