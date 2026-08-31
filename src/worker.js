@@ -199,8 +199,17 @@ const routes = {
         target.oppStage = m.stage || target.oppStage;
         target.linkedAt = body.asOf || new Date().toISOString();
 
+        // "Held" means the opp ever reached Discovery — a historical fact
+        // that must survive a later stage change. Checking only the CURRENT
+        // stage is wrong: a deal that reached Discovery and then Closed Lost
+        // would show as Lost only, never Held, understating real held rate.
+        // reachedDiscovery is the authoritative signal (from
+        // Timestamp_Discovery__c on the Salesforce side); current-stage
+        // membership in PAST_DISCOVERY_STAGES is kept only as a fallback for
+        // callers that don't send it.
         const stage = String(m.stage || "").toLowerCase();
-        if (PAST_DISCOVERY_STAGES.indexOf(stage) !== -1 && !target.held) {
+        const reachedDiscovery = m.reachedDiscovery === true || PAST_DISCOVERY_STAGES.indexOf(stage) !== -1;
+        if (reachedDiscovery && !target.held) {
           target.held = true;
           const ae = findAe(state, target.aeId);
           if (ae) ae.heldRR += 1;
