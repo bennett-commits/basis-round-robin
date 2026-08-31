@@ -209,13 +209,21 @@ const routes = {
         // callers that don't send it.
         const stage = String(m.stage || "").toLowerCase();
         const reachedDiscovery = m.reachedDiscovery === true || PAST_DISCOVERY_STAGES.indexOf(stage) !== -1;
-        if (reachedDiscovery && !target.held) {
-          target.held = true;
-          const ae = findAe(state, target.aeId);
-          if (ae) ae.heldRR += 1;
-          heldCount++;
-        }
-        if (stage === "closed lost" && !target.lost) {
+        if (reachedDiscovery) {
+          if (!target.held) {
+            target.held = true;
+            const ae = findAe(state, target.aeId);
+            if (ae) ae.heldRR += 1;
+            heldCount++;
+          }
+          // A deal that reached Discovery and later died is normal sales
+          // attrition, not a "no show" — clear any earlier no-show flag now
+          // that we know better (this also corrects records synced before
+          // this reachedDiscovery signal existed).
+          if (target.lost) target.lost = false;
+        } else if (stage === "closed lost" && !target.lost) {
+          // Closed dead without ever reaching Discovery — a true no-show,
+          // not a normal loss further down the funnel.
           target.lost = true;
           lostCount++;
         }

@@ -288,7 +288,7 @@
     var out = "";
     if(!entry.held && !entry.lost) out += '<span class="pill pill-booked">Booked</span>';
     if(entry.held) out += '<span class="pill pill-held">Held</span>';
-    if(entry.lost) out += '<span class="pill pill-lost">Lost</span>';
+    if(entry.lost) out += '<span class="pill pill-lost">No show</span>';
     if(entry.flagged) out += '<span class="pill pill-flagged">Flagged</span>';
     return out;
   }
