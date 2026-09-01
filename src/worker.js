@@ -113,7 +113,8 @@ const routes = {
       const name = String(body.name || "").trim();
       if (!name) return json({ error: "name is required" }, { status: 400 });
       const pool = normalizePool(body.pool);
-      const ae = { id: newId("ae"), name, pool, active: true, weight: 20, bookedRR: 0, heldRR: 0, totalHeld30d: 0 };
+      const email = String(body.email || "").trim();
+      const ae = { id: newId("ae"), name, pool, email, active: true, weight: 20, bookedRR: 0, heldRR: 0, totalHeld30d: 0 };
       state.aes.push(ae);
       await saveState(env, state);
       return json({ ae });
@@ -122,7 +123,7 @@ const routes = {
       const ae = findAe(state, body.id);
       if (!ae) return json({ error: "AE not found" }, { status: 404 });
       const patch = body.patch || {};
-      ["active", "weight", "bookedRR", "heldRR", "totalHeld30d", "name"].forEach(key => {
+      ["active", "weight", "bookedRR", "heldRR", "totalHeld30d", "name", "email"].forEach(key => {
         if (Object.prototype.hasOwnProperty.call(patch, key)) ae[key] = patch[key];
       });
       await saveState(env, state);

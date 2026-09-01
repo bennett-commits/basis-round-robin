@@ -14,7 +14,9 @@
       spinBtn:"spinBtn", resultSlot:"resultSlot",
       logRows:"logRows", emptyLog:"emptyLog", statStrip:"statStrip",
       tableBody:"aeTableBody", weightWarning:"weightWarning", factorToggle:"factorHoldToggle",
-      newAeName:"newAeName", addAeBtn:"addAeBtn"
+      newAeName:"newAeName", addAeBtn:"addAeBtn",
+      calendarPanelTitle:"calendarPanelTitle", calendarPanelOpenLink:"calendarPanelOpenLink",
+      calendarEmpty:"calendarEmpty", calendarIframe:"calendarIframe"
     },
     ramping: {
       reelWrap:"reelWrapRamping", reelTrack:"reelTrackRamping", reelEmpty:"reelEmptyRamping", reelFullName:"reelFullNameRamping",
@@ -22,7 +24,9 @@
       spinBtn:"spinBtnRamping", resultSlot:"resultSlotRamping",
       logRows:"logRowsRamping", emptyLog:"emptyLogRamping", statStrip:"statStripRamping",
       tableBody:"aeTableBodyRamping", weightWarning:"weightWarningRamping", factorToggle:"factorHoldToggleRamping",
-      newAeName:"newAeNameRamping", addAeBtn:"addAeBtnRamping"
+      newAeName:"newAeNameRamping", addAeBtn:"addAeBtnRamping",
+      calendarPanelTitle:"calendarPanelTitleRamping", calendarPanelOpenLink:"calendarPanelOpenLinkRamping",
+      calendarEmpty:"calendarEmptyRamping", calendarIframe:"calendarIframeRamping"
     }
   };
 
@@ -271,12 +275,23 @@
 
   function showResult(pool, entry){
     var ui = POOL_UI[pool];
+    var ae = state.aes.find(function(a){ return a.id===entry.aeId; });
+    var scheduleHtml = "";
+    if(ae && ae.email){
+      scheduleHtml = '<a class="btn-secondary schedule-link" id="scheduleLink'+pool+'" href="'+escapeHtml(scheduleMeetingLink(ae, entry.accountName, entry.bdrName))+'" target="_blank" rel="noopener">Schedule meeting ↗</a>';
+    }
     document.getElementById(ui.resultSlot).innerHTML =
-      '<div class="result-account-quickadd"><input type="text" id="quickAccountInput'+pool+'" placeholder="Account name (optional)" /></div>';
+      '<div class="result-account-quickadd"><input type="text" id="quickAccountInput'+pool+'" placeholder="Account name (optional)" /></div>' +
+      scheduleHtml;
     var quickInput = document.getElementById("quickAccountInput"+pool);
     quickInput.addEventListener("change", function(){
       api("/api/log/account", { method:"POST", body:{ id: entry.id, accountName: quickInput.value.trim() } })
         .then(fetchState);
+    });
+    quickInput.addEventListener("input", function(){
+      if(!ae || !ae.email) return;
+      var link = document.getElementById("scheduleLink"+pool);
+      if(link) link.href = scheduleMeetingLink(ae, quickInput.value.trim(), entry.bdrName);
     });
     quickInput.focus();
     booking[pool] = false;
@@ -421,6 +436,70 @@
     });
   }
 
+  // ---------- Live calendar panel (radical prototype — preview only) ----------
+  // Only reloads the iframe when the underlying AE actually changes, so the
+  // 4s poll doesn't reflicker the calendar every tick.
+  var calendarLoadedAeId = { core:null, ramping:null };
+
+  function renderCalendarPanel(pool){
+    var ui = POOL_UI[pool];
+    var titleEl = document.getElementById(ui.calendarPanelTitle);
+    var linkEl = document.getElementById(ui.calendarPanelOpenLink);
+    var emptyEl = document.getElementById(ui.calendarEmpty);
+    var iframeEl = document.getElementById(ui.calendarIframe);
+    var queue = (state.nextQueue && state.nextQueue[pool]) || [];
+    var nextItem = queue[0];
+    var ae = nextItem ? state.aes.find(function(a){ return a.id===nextItem.id; }) : null;
+
+    if(!ae){
+      titleEl.textContent = "Calendar";
+      linkEl.style.display = "none";
+      emptyEl.style.display = "block";
+      emptyEl.textContent = "Activate at least one AE to see their calendar.";
+      iframeEl.style.display = "none";
+      calendarLoadedAeId[pool] = null;
+      return;
+    }
+
+    titleEl.textContent = ae.name.split(" ")[0] + "’s calendar";
+
+    if(!ae.email){
+      linkEl.style.display = "none";
+      emptyEl.style.display = "block";
+      emptyEl.textContent = "Add "+ae.name+"'s email in Admin to see their live calendar here.";
+      iframeEl.style.display = "none";
+      calendarLoadedAeId[pool] = null;
+      return;
+    }
+
+    emptyEl.style.display = "none";
+    linkEl.style.display = "inline-block";
+    linkEl.href = "https://calendar.google.com/calendar/u/0?cid="+encodeURIComponent(ae.email);
+
+    if(calendarLoadedAeId[pool] !== ae.id){
+      calendarLoadedAeId[pool] = ae.id;
+      iframeEl.src = "https://calendar.google.com/calendar/embed?src="+encodeURIComponent(ae.email)+
+        "&mode=WEEK&showTitle=0&showPrint=0&showCalendars=0&showTz=0&showNav=1&showDate=1&bgcolor=%23FFFFFF";
+    }
+    iframeEl.style.display = "block";
+  }
+
+  // Builds a Google Calendar "quick add" link pre-filled with the AE (and
+  // account name, if entered) as guests — opens in a new tab, one click to
+  // save. Uses the BDR's own logged-in Google session; we never create the
+  // event ourselves.
+  function scheduleMeetingLink(ae, accountName, bdrName){
+    var title = accountName ? ("Basis <> " + accountName) : ("Basis intro call — " + ae.name);
+    var details = "Booked via the Basis round robin" + (bdrName ? (" by " + bdrName) : "") + ".";
+    var params = [
+      "action=TEMPLATE",
+      "text=" + encodeURIComponent(title),
+      "details=" + encodeURIComponent(details),
+      "add=" + encodeURIComponent(ae.email)
+    ];
+    return "https://calendar.google.com/calendar/render?" + params.join("&");
+  }
+
   function renderHeaderSummary(){
     var coreCount = activeAes("core").length;
     var rampingCount = activeAes("ramping").length;
@@ -464,6 +543,7 @@
       tr.innerHTML =
         '<td><div class="switch"><input type="checkbox" '+(a.active?'checked':'')+' data-action="toggle-active" data-id="'+a.id+'"/><span class="slider-track"></span></div></td>' +
         '<td><div class="ae-name-cell"><span class="swatch" style="background:'+colorFor(idx)+'"></span>'+escapeHtml(a.name)+'</div></td>' +
+        '<td><input type="email" class="num-input email-input" placeholder="name@ofbasis.com" value="'+escapeHtml(a.email||"")+'" data-action="email" data-id="'+a.id+'"/></td>' +
         '<td><div class="weight-cell">' +
           '<input type="range" min="0" max="100" value="'+a.weight+'" data-action="weight" data-id="'+a.id+'"/>' +
           '<input type="number" min="0" max="100" class="num-input weight-num-input" value="'+a.weight+'" data-action="weight-num" data-id="'+a.id+'"/>' +
@@ -511,6 +591,11 @@
         });
       });
     });
+    body.querySelectorAll('[data-action="email"]').forEach(function(el){
+      el.addEventListener("change", function(){
+        adminApi("/api/admin/ae", { method:"POST", body:{ action:"update", id: el.getAttribute("data-id"), patch:{ email: el.value.trim() } } }).then(fetchState);
+      });
+    });
     body.querySelectorAll('[data-action="remove"]').forEach(function(el){
       el.addEventListener("click", function(){
         adminApi("/api/admin/ae", { method:"POST", body:{ action:"remove", id: el.getAttribute("data-id") } }).then(fetchState);
@@ -526,6 +611,7 @@
       renderLog(pool);
       renderStats(pool);
       renderAdmin(pool);
+      renderCalendarPanel(pool);
       updateSpinReady(pool);
     });
     renderAdminLog();

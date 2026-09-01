@@ -63,19 +63,28 @@
         </div>
       </div>
 
-      <div class="log-card">
-        <h2>Recent assignments</h2>
-        <p class="log-sub">Shared live across everyone on this page. Add the account name once it's booked — the hourly Salesforce sync links it to an opp and updates status automatically. Spun by accident? Press 🚩 to flag it for an admin to clear.</p>
-        <div class="ae-table-wrap" style="box-shadow:none;">
-          <table class="ae-table" style="min-width:620px;">
-            <thead>
-              <tr><th>Time</th><th>BDR</th><th>AE</th><th>Account name</th><th>Status</th><th></th></tr>
-            </thead>
-            <tbody id="logRows"></tbody>
-          </table>
+      <div class="calendar-panel">
+        <div class="calendar-panel-header">
+          <h2 id="calendarPanelTitle">Calendar</h2>
+          <a id="calendarPanelOpenLink" href="#" target="_blank" rel="noopener" class="btn-secondary" style="font-size:12px; padding:6px 12px; display:none;">Open in Google Calendar ↗</a>
         </div>
-        <div class="empty-log" id="emptyLog">No assignments yet.</div>
+        <div class="calendar-empty" id="calendarEmpty">Add this AE's email in Admin to see their live calendar here.</div>
+        <iframe id="calendarIframe" class="calendar-iframe" style="display:none;" frameborder="0"></iframe>
       </div>
+    </div>
+
+    <div class="log-card" style="margin-top:20px;">
+      <h2>Recent assignments</h2>
+      <p class="log-sub">Shared live across everyone on this page. Add the account name once it's booked — the hourly Salesforce sync links it to an opp and updates status automatically. Spun by accident? Press 🚩 to flag it for an admin to clear.</p>
+      <div class="ae-table-wrap" style="box-shadow:none;">
+        <table class="ae-table" style="min-width:620px;">
+          <thead>
+            <tr><th>Time</th><th>BDR</th><th>AE</th><th>Account name</th><th>Status</th><th></th></tr>
+          </thead>
+          <tbody id="logRows"></tbody>
+        </table>
+      </div>
+      <div class="empty-log" id="emptyLog">No assignments yet.</div>
     </div>
 
     <div class="stat-strip" id="statStrip"></div>
@@ -105,19 +114,28 @@
         </div>
       </div>
 
-      <div class="log-card">
-        <h2>Recent assignments</h2>
-        <p class="log-sub">Separate rotation from the core AE pool — shared live across everyone on this page. Add the account name once it's booked — the hourly Salesforce sync links it to an opp and updates status automatically. Spun by accident? Press 🚩 to flag it for an admin to clear.</p>
-        <div class="ae-table-wrap" style="box-shadow:none;">
-          <table class="ae-table" style="min-width:620px;">
-            <thead>
-              <tr><th>Time</th><th>BDR</th><th>AE</th><th>Account name</th><th>Status</th><th></th></tr>
-            </thead>
-            <tbody id="logRowsRamping"></tbody>
-          </table>
+      <div class="calendar-panel">
+        <div class="calendar-panel-header">
+          <h2 id="calendarPanelTitleRamping">Calendar</h2>
+          <a id="calendarPanelOpenLinkRamping" href="#" target="_blank" rel="noopener" class="btn-secondary" style="font-size:12px; padding:6px 12px; display:none;">Open in Google Calendar ↗</a>
         </div>
-        <div class="empty-log" id="emptyLogRamping">No assignments yet.</div>
+        <div class="calendar-empty" id="calendarEmptyRamping">Add this rep's email in Admin to see their live calendar here.</div>
+        <iframe id="calendarIframeRamping" class="calendar-iframe" style="display:none;" frameborder="0"></iframe>
       </div>
+    </div>
+
+    <div class="log-card" style="margin-top:20px;">
+      <h2>Recent assignments</h2>
+      <p class="log-sub">Separate rotation from the core AE pool — shared live across everyone on this page. Add the account name once it's booked — the hourly Salesforce sync links it to an opp and updates status automatically. Spun by accident? Press 🚩 to flag it for an admin to clear.</p>
+      <div class="ae-table-wrap" style="box-shadow:none;">
+        <table class="ae-table" style="min-width:620px;">
+          <thead>
+            <tr><th>Time</th><th>BDR</th><th>AE</th><th>Account name</th><th>Status</th><th></th></tr>
+          </thead>
+          <tbody id="logRowsRamping"></tbody>
+        </table>
+      </div>
+      <div class="empty-log" id="emptyLogRamping">No assignments yet.</div>
     </div>
 
     <div class="stat-strip" id="statStripRamping"></div>
@@ -144,6 +162,7 @@
           <tr>
             <th>In RR</th>
             <th>AE</th>
+            <th>Email (for calendar)</th>
             <th>Target weight</th>
             <th>Booked (RR)</th>
             <th>Held (RR)</th>
@@ -177,6 +196,7 @@
           <tr>
             <th>In RR</th>
             <th>AE</th>
+            <th>Email (for calendar)</th>
             <th>Target weight</th>
             <th>Booked (RR)</th>
             <th>Held (RR)</th>
