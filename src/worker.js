@@ -1,7 +1,9 @@
 import {
   loadState, saveState, activeAes, findAe, findLogEntry,
   overallHoldRate, effectiveWeights, pickNextAe, previewQueue, newId,
-  json, requireAdmin, requireSyncToken, PAST_DISCOVERY_STAGES, POOLS
+  json, requireAdmin, requireSyncToken, requireAdminOrSyncToken,
+  resetCycleCounters, cycleEndsAt, inCurrentCycle,
+  PAST_DISCOVERY_STAGES, POOLS, CYCLE_DAYS
 } from "./lib/state.js";
 
 async function readJson(request) {
@@ -32,6 +34,8 @@ const routes = {
     });
     return json({
       ...state,
+      cycleDays: CYCLE_DAYS,
+      cycleEndsAt: cycleEndsAt(state),
       effectiveWeights: effectiveWeightsByPool,
       overallHoldRate: overallHoldRateByPool,
       nextQueue: nextQueueByPool
@@ -93,7 +97,9 @@ const routes = {
     if (index === -1) return json({ error: "Log entry not found" }, { status: 404 });
     const entry = state.log[index];
     const ae = findAe(state, entry.aeId);
-    if (ae) {
+    // Only debit counters if this entry is actually part of what they count.
+    // Deleting a pre-reset entry must not claw back from the new cycle.
+    if (ae && inCurrentCycle(state, entry)) {
       ae.bookedRR = Math.max(0, ae.bookedRR - 1);
       if (entry.held) ae.heldRR = Math.max(0, ae.heldRR - 1);
     }
@@ -158,6 +164,28 @@ const routes = {
     return json({ ok: true });
   },
 
+  // Force a new weighting cycle immediately, instead of waiting for the
+  // 30-day boundary. Counters go to zero; weights, roster and log survive.
+  "POST /api/admin/reset-cycle": async ({ request, env }) => {
+    const unauthorized = requireAdminOrSyncToken(request, env);
+    if (unauthorized) return unauthorized;
+    const state = await loadState(env);
+    const before = state.aes.map(a => ({
+      name: a.name, pool: a.pool, bookedRR: a.bookedRR, heldRR: a.heldRR
+    }));
+    const startedAt = new Date().toISOString();
+    resetCycleCounters(state, startedAt);
+    await saveState(env, state);
+    return json({
+      ok: true,
+      cycleStartedAt: startedAt,
+      cycleEndsAt: cycleEndsAt(state),
+      cycleDays: CYCLE_DAYS,
+      aesReset: before.length,
+      before
+    });
+  },
+
   "GET /api/admin/pending": async ({ request, env }) => {
     const unauthorized = requireSyncToken(request, env);
     if (unauthorized) return unauthorized;
@@ -212,9 +240,13 @@ const routes = {
         const reachedDiscovery = m.reachedDiscovery === true || PAST_DISCOVERY_STAGES.indexOf(stage) !== -1;
         if (reachedDiscovery) {
           if (!target.held) {
+            // The log entry's held flag is a permanent historical fact, so it
+            // is always set. The AE's heldRR is per-cycle, so a booking made
+            // before the current cycle must not credit it — otherwise a late
+            // sync could push heldRR above bookedRR and distort hold rate.
             target.held = true;
             const ae = findAe(state, target.aeId);
-            if (ae) ae.heldRR += 1;
+            if (ae && inCurrentCycle(state, target)) ae.heldRR += 1;
             heldCount++;
           }
           // A deal that reached Discovery and later died is normal sales

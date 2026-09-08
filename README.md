@@ -28,6 +28,32 @@ that (trying to force a Pages-style deploy command) is more fragile than just
 building to what the platform actually creates: one Worker serving both the
 static frontend and the `/api/*` backend, with KV for storage.
 
+## Weighting cycles (30 days)
+
+The deficit queue converges on target weights using each AE's accumulated
+`bookedRR`. Left unbounded those counters carry all-time history, so a weight
+change, a rep going inactive, or a roster change stays "priced in" long after
+it stopped being true — the queue keeps paying back an old imbalance instead
+of tracking today's weights.
+
+So the per-AE counters (`bookedRR` / `heldRR`) reset to zero every 30 days:
+
+- The cycle start is stored as `cycleStartedAt`. On every read, `maybeRollCycle`
+  advances it by whole 30-day periods and zeroes the counters if a boundary has
+  passed — no cron trigger needed. It is a pure function of
+  (`cycleStartedAt`, now), so it is idempotent and only persists on the next write.
+- **Nothing else resets.** Configured `weight`, the roster, the assignment log,
+  and each entry's held/lost/opp linkage all survive. Only the counters clear.
+- Log entries from earlier cycles no longer move the counters: deleting a
+  pre-reset entry won't claw back from the new cycle, and a late Salesforce sync
+  on a pre-reset booking marks the entry held without crediting `heldRR`
+  (which would otherwise push held above booked and distort hold rate).
+- To reset early, `POST /api/admin/reset-cycle` with either the admin password
+  (`x-admin-password`) or the sync token (`x-sync-token`). It returns the
+  pre-reset counters so a reset can be audited or undone.
+
+The admin tab shows the current cycle window and the days remaining.
+
 ## One-time setup
 
 ### 1. Push this to GitHub

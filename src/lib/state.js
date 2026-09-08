@@ -15,10 +15,22 @@
 const STATE_KEY = "state";
 export const POOLS = ["core", "ramping"];
 
+// Weighting runs in fixed 30-day cycles. The deficit queue converges on target
+// weights using each AE's accumulated bookedRR, so without a reset those
+// counters carry all-time history forever: a weight change, a rep going
+// inactive for a stretch, or a mid-quarter roster change stays "priced in"
+// long after it stopped being true. Zeroing bookedRR/heldRR every 30 days
+// makes the rotation converge on the CURRENT weights within a bounded window.
+// Only the per-AE counters reset — configured `weight`, the assignment log,
+// and each entry's held/lost history are untouched.
+export const CYCLE_DAYS = 30;
+export const CYCLE_MS = CYCLE_DAYS * 24 * 60 * 60 * 1000;
+
 export function defaultState() {
   return {
     factorHoldRate: { core: false, ramping: false },
     sfPullDate: null,
+    cycleStartedAt: null,
     aes: [],
     log: []
   };
@@ -45,11 +57,63 @@ export async function loadState(env) {
   state.aes = (state.aes || []).map(a => ({ pool: "core", ...a }));
   state.log = (state.log || []).map(e => ({ pool: "core", ...e }));
 
+  // Roll the 30-day cycle on read so every caller sees a correctly-scoped
+  // state. This is deliberately NOT persisted here: maybeRollCycle is a pure
+  // function of (cycleStartedAt, now) that advances by whole 30-day periods,
+  // so recomputing it on each load is idempotent and the next write persists
+  // it. That keeps reads free of KV writes.
+  maybeRollCycle(state);
+
   return state;
 }
 
 export async function saveState(env, state) {
   await env.RR_KV.put(STATE_KEY, JSON.stringify(state));
+}
+
+// Zero the per-cycle counters and stamp a new cycle start. Deliberately does
+// not touch `weight`, the log, or any entry's held/lost flags.
+export function resetCycleCounters(state, startedAt) {
+  state.aes.forEach(a => { a.bookedRR = 0; a.heldRR = 0; });
+  state.cycleStartedAt = startedAt;
+  return state;
+}
+
+// Advance the cycle if one or more full 30-day periods have elapsed. The new
+// start is the old start plus a whole number of periods (never "now"), so the
+// cycle boundaries stay on a fixed cadence and the result is identical no
+// matter how many times this runs within the same period. Returns true if
+// counters were actually reset.
+export function maybeRollCycle(state, now) {
+  const nowMs = typeof now === "number" ? now : Date.now();
+  const start = Date.parse(state.cycleStartedAt || "");
+  if (!Number.isFinite(start)) {
+    // First run after this feature shipped (or a corrupt value): start the
+    // clock now without wiping anything. An explicit reset is a separate act.
+    state.cycleStartedAt = new Date(nowMs).toISOString();
+    return false;
+  }
+  const elapsed = nowMs - start;
+  if (elapsed < CYCLE_MS) return false;
+  const periods = Math.floor(elapsed / CYCLE_MS);
+  resetCycleCounters(state, new Date(start + periods * CYCLE_MS).toISOString());
+  return true;
+}
+
+export function cycleEndsAt(state) {
+  const start = Date.parse(state.cycleStartedAt || "");
+  if (!Number.isFinite(start)) return null;
+  return new Date(start + CYCLE_MS).toISOString();
+}
+
+// Whether a log entry belongs to the cycle currently being counted. Entries
+// from earlier cycles must not move bookedRR/heldRR, or a delete (or a late
+// Salesforce sync) would credit/debit a counter that never included them.
+export function inCurrentCycle(state, entry) {
+  const start = Date.parse(state.cycleStartedAt || "");
+  const ts = Date.parse((entry && entry.ts) || "");
+  if (!Number.isFinite(start) || !Number.isFinite(ts)) return true;
+  return ts >= start;
 }
 
 export function activeAes(state, pool) {
@@ -149,6 +213,14 @@ export function requireAdmin(request, env) {
     return json({ error: "Unauthorized" }, { status: 401 });
   }
   return null;
+}
+
+// The reset is a maintenance action reachable two ways: a human admin in the
+// UI, or the Salesforce sync job's token (which already has write access to
+// these very counters, so this grants it nothing new).
+export function requireAdminOrSyncToken(request, env) {
+  if (!requireAdmin(request, env)) return null;
+  return requireSyncToken(request, env);
 }
 
 export function requireSyncToken(request, env) {

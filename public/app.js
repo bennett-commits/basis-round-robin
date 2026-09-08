@@ -30,7 +30,7 @@
     }
   };
 
-  var state = { factorHoldRate:{core:false,ramping:false}, sfPullDate:null, aes:[], log:[], effectiveWeights:{core:{},ramping:{}}, overallHoldRate:{core:null,ramping:null}, nextQueue:{core:[],ramping:[]} };
+  var state = { factorHoldRate:{core:false,ramping:false}, sfPullDate:null, cycleStartedAt:null, cycleEndsAt:null, aes:[], log:[], effectiveWeights:{core:{},ramping:{}}, overallHoldRate:{core:null,ramping:null}, nextQueue:{core:[],ramping:[]} };
   var booking = { core:false, ramping:false };
   var reelAnimating = { core:false, ramping:false };
   var adminPassword = sessionStorage.getItem("rr_admin_password") || null;
@@ -620,6 +620,17 @@
     renderHeaderSummary();
     var pullLabel = document.getElementById("sfPullDateLabel");
     if(pullLabel) pullLabel.textContent = state.sfPullDate ? new Date(state.sfPullDate).toLocaleString() : "never yet";
+    var cycleLabel = document.getElementById("cycleWindowLabel");
+    if(cycleLabel){
+      if(state.cycleStartedAt && state.cycleEndsAt){
+        var d = Math.max(0, Math.ceil((new Date(state.cycleEndsAt) - new Date()) / 86400000));
+        cycleLabel.textContent = "started " + new Date(state.cycleStartedAt).toLocaleDateString()
+          + ", resets " + new Date(state.cycleEndsAt).toLocaleDateString()
+          + " (" + d + " day" + (d === 1 ? "" : "s") + " left)";
+      } else {
+        cycleLabel.textContent = "—";
+      }
+    }
   }
 
   // ---------- View switching ----------
