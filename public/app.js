@@ -10,6 +10,9 @@
   var POOL_UI = {
     core: {
       reelWrap:"reelWrap", reelTrack:"reelTrack", reelEmpty:"reelEmpty", reelFullName:"reelFullName",
+      reelEyebrow:"reelEyebrow",
+      overrideSelect:"overrideSelect", overrideSetBtn:"overrideSetBtn",
+      overrideClearBtn:"overrideClearBtn", overrideStatus:"overrideStatus",
       bdrInput:"bdrNameInput", bdrHint:"bdrHint", bdrSuggestions:"bdrSuggestions",
       spinBtn:"spinBtn", resultSlot:"resultSlot",
       logRows:"logRows", emptyLog:"emptyLog", statStrip:"statStrip",
@@ -20,6 +23,9 @@
     },
     ramping: {
       reelWrap:"reelWrapRamping", reelTrack:"reelTrackRamping", reelEmpty:"reelEmptyRamping", reelFullName:"reelFullNameRamping",
+      reelEyebrow:"reelEyebrowRamping",
+      overrideSelect:"overrideSelectRamping", overrideSetBtn:"overrideSetBtnRamping",
+      overrideClearBtn:"overrideClearBtnRamping", overrideStatus:"overrideStatusRamping",
       bdrInput:"bdrNameInputRamping", bdrHint:"bdrHintRamping", bdrSuggestions:"bdrSuggestionsRamping",
       spinBtn:"spinBtnRamping", resultSlot:"resultSlotRamping",
       logRows:"logRowsRamping", emptyLog:"emptyLogRamping", statStrip:"statStripRamping",
@@ -30,7 +36,7 @@
     }
   };
 
-  var state = { factorHoldRate:{core:false,ramping:false}, sfPullDate:null, cycleStartedAt:null, cycleEndsAt:null, aes:[], log:[], effectiveWeights:{core:{},ramping:{}}, overallHoldRate:{core:null,ramping:null}, nextQueue:{core:[],ramping:[]} };
+  var state = { factorHoldRate:{core:false,ramping:false}, nextOverride:{core:null,ramping:null}, sfPullDate:null, cycleStartedAt:null, cycleEndsAt:null, aes:[], log:[], effectiveWeights:{core:{},ramping:{}}, overallHoldRate:{core:null,ramping:null}, nextQueue:{core:[],ramping:[]} };
   var booking = { core:false, ramping:false };
   var reelAnimating = { core:false, ramping:false };
   var adminPassword = sessionStorage.getItem("rr_admin_password") || null;
@@ -101,6 +107,8 @@
     var empty = document.getElementById(ui.reelEmpty);
     var fullName = document.getElementById(ui.reelFullName);
     var queue = (state.nextQueue && state.nextQueue[pool]) || [];
+    var eyebrow = document.getElementById(ui.reelEyebrow);
+    if(eyebrow) eyebrow.textContent = (queue[0] && queue[0].forced) ? "Next up · set by admin" : "Next up";
     track.style.transform = "translateY(0)";
     if(queue.length===0){
       track.innerHTML = "";
@@ -304,8 +312,67 @@
     if(!entry.held && !entry.lost) out += '<span class="pill pill-booked">Booked</span>';
     if(entry.held) out += '<span class="pill pill-held">Held</span>';
     if(entry.lost) out += '<span class="pill pill-lost">No show</span>';
+    if(entry.forced) out += '<span class="pill pill-manual">Manual</span>';
     if(entry.flagged) out += '<span class="pill pill-flagged">Flagged</span>';
     return out;
+  }
+
+  // Options for the retroactive-reassign dropdown, grouped by pool so a
+  // cross-pool move is an explicit choice rather than an accident.
+  function aeOptionsHtml(selectedId, fallbackName){
+    var html = "";
+    // An entry can point at an AE who has since been removed from the roster.
+    // Surface that as a selected placeholder instead of silently showing
+    // whoever happens to sit first in the list.
+    var known = state.aes.some(function(a){ return a.id===selectedId; });
+    if(!known){
+      html += '<option value="" selected>'+escapeHtml(fallbackName || "Unknown")+' (no longer on roster)</option>';
+    }
+    POOLS.forEach(function(pool){
+      var list = state.aes.filter(function(a){ return a.pool===pool; });
+      if(list.length===0) return;
+      html += '<optgroup label="'+(pool==="ramping" ? "Ramping Reps" : "Core AEs")+'">';
+      list.forEach(function(a){
+        html += '<option value="'+a.id+'"'+(a.id===selectedId ? ' selected' : '')+'>'+
+                escapeHtml(a.name)+(a.active ? '' : ' (inactive)')+'</option>';
+      });
+      html += '</optgroup>';
+    });
+    return html;
+  }
+
+  // ---------- Intro activity cells (Recent assignments) ----------
+  // Populated by the Salesforce sync once the entry is linked to an opp, and
+  // re-checked every sync run until settled. Three states per cell: no opp
+  // linked yet (nothing to check), checked and found, checked and not found.
+  function shortDate(iso, withTime){
+    var d = new Date(iso);
+    var o = withTime ? { month:"short", day:"numeric", hour:"numeric", minute:"2-digit" } : { month:"short", day:"numeric" };
+    return d.toLocaleString([], o);
+  }
+
+  function introMeetingCell(entry){
+    if(!entry.oppId) return '<td class="activity-cell muted" title="No Salesforce opp linked yet">—</td>';
+    if(!entry.introMeetingAt){
+      return entry.activityCheckedAt
+        ? '<td class="activity-cell muted" title="No meeting found on the opp in Salesforce">Not set</td>'
+        : '<td class="activity-cell muted" title="Waiting for the next Salesforce sync">…</td>';
+    }
+    var upcoming = Date.parse(entry.introMeetingAt) > Date.now();
+    return '<td class="activity-cell'+(upcoming ? ' upcoming' : '')+'" title="'+(upcoming ? 'Upcoming' : 'Past')+'">'+
+      escapeHtml(shortDate(entry.introMeetingAt, true))+'</td>';
+  }
+
+  function introEmailCell(entry, key, who){
+    if(!entry.oppId) return '<td class="activity-cell muted" title="No Salesforce opp linked yet">—</td>';
+    var email = entry[key];
+    if(email){
+      var tip = who+" email sent "+shortDate(email.sentAt, true)+(email.subject ? ": "+email.subject : "");
+      return '<td class="activity-cell"><span class="pill pill-sent" title="'+escapeHtml(tip)+'">✓ '+escapeHtml(shortDate(email.sentAt))+'</span></td>';
+    }
+    if(!entry.activityCheckedAt) return '<td class="activity-cell muted" title="Waiting for the next Salesforce sync">…</td>';
+    return '<td class="activity-cell"><span class="pill pill-not-sent" title="No '+who+' intro email found on the contact as of '+
+      escapeHtml(shortDate(entry.activityCheckedAt, true))+'">Not yet</span></td>';
   }
 
   function logRowHtml(entry, opts){
@@ -313,6 +380,13 @@
     var oppNote = entry.oppName
       ? '<div class="opp-link-note">↳ '+escapeHtml(entry.oppName)+(entry.oppStage ? ' · '+escapeHtml(entry.oppStage) : '')+'</div>'
       : "";
+    var reassignNote = entry.reassignedFrom
+      ? '<div class="opp-link-note">↳ reassigned from '+escapeHtml(entry.reassignedFrom)+'</div>'
+      : "";
+    var aeCell = opts.allowReassign
+      ? '<td class="log-name"><select class="num-input reassign-select" data-action="reassign" data-id="'+entry.id+'" title="Reassign this deal to another AE">'+
+          aeOptionsHtml(entry.aeId, entry.name)+'</select>'+reassignNote+'</td>'
+      : '<td class="log-name" style="font-weight:600;">'+escapeHtml(entry.name)+reassignNote+'</td>';
     var actions =
       '<button class="flag-btn'+(entry.flagged?' active':'')+'" data-action="flag-log" data-id="'+entry.id+'" title="'+(entry.flagged?'Unflag':'Flag as a false click')+'">🚩</button>';
     if(opts.showDelete){
@@ -326,8 +400,11 @@
       '<td class="hold-rate">'+escapeHtml(ts)+'</td>' +
       poolCell +
       '<td>'+escapeHtml(entry.bdrName || "—")+'</td>' +
-      '<td class="log-name" style="font-weight:600;">'+escapeHtml(entry.name)+'</td>' +
+      aeCell +
       '<td><input type="text" class="num-input account-input" placeholder="Account name" value="'+escapeHtml(entry.accountName || "")+'" data-action="account-name" data-id="'+entry.id+'"/>'+oppNote+'</td>' +
+      (opts.showActivity
+        ? introMeetingCell(entry) + introEmailCell(entry, "bdrIntroEmail", "BDR") + introEmailCell(entry, "aeIntroEmail", "AE")
+        : "") +
       '<td>'+statusPillsHtml(entry)+'</td>' +
       '<td style="white-space:nowrap;">'+actions+'</td>'
     );
@@ -345,6 +422,13 @@
         api("/api/log/flag", { method:"POST", body:{ id: el.getAttribute("data-id") } }).then(fetchState);
       });
     });
+    container.querySelectorAll('[data-action="reassign"]').forEach(function(el){
+      el.addEventListener("change", function(){
+        if(!el.value) return; // the "no longer on roster" placeholder
+        adminApi("/api/log/reassign", { method:"POST", body:{ id: el.getAttribute("data-id"), aeId: el.value } })
+          .then(fetchState);
+      });
+    });
     container.querySelectorAll('[data-action="delete-log"]').forEach(function(el){
       el.addEventListener("click", function(){
         adminApi("/api/log/delete", { method:"POST", body:{ id: el.getAttribute("data-id") } }).then(fetchState);
@@ -357,7 +441,11 @@
   // re-render, or the whole table freezes right after any toggle click.
   function isEditing(container){
     var active = document.activeElement;
-    if(!active || !container.contains(active) || active.tagName !== "INPUT") return false;
+    if(!active || !container.contains(active)) return false;
+    // A focused <select> may have its dropdown open; re-rendering would close
+    // it and discard the admin's half-made choice.
+    if(active.tagName === "SELECT") return true;
+    if(active.tagName !== "INPUT") return false;
     return active.type !== "checkbox" && active.type !== "range";
   }
 
@@ -372,7 +460,7 @@
     empty.style.display="none";
     entries.slice(0,20).forEach(function(entry){
       var tr = document.createElement("tr");
-      tr.innerHTML = logRowHtml(entry, {showDelete:false});
+      tr.innerHTML = logRowHtml(entry, {showDelete:false, showActivity:true});
       container.appendChild(tr);
     });
     attachLogRowHandlers(container);
@@ -387,7 +475,7 @@
     empty.style.display = "none";
     state.log.forEach(function(entry){
       var tr = document.createElement("tr");
-      tr.innerHTML = logRowHtml(entry, {showDelete:true, showPool:true});
+      tr.innerHTML = logRowHtml(entry, {showDelete:true, showPool:true, allowReassign:true});
       container.appendChild(tr);
     });
     attachLogRowHandlers(container);
@@ -403,7 +491,7 @@
     empty.style.display = "none";
     flagged.forEach(function(entry){
       var tr = document.createElement("tr");
-      tr.innerHTML = logRowHtml(entry, {showDelete:true, clearLabel:"Clear", showPool:true});
+      tr.innerHTML = logRowHtml(entry, {showDelete:true, clearLabel:"Clear", showPool:true, allowReassign:true});
       container.appendChild(tr);
     });
     attachLogRowHandlers(container);
@@ -510,6 +598,43 @@
       : total+" AE"+(total>1?"s":"")+" active ("+coreCount+" core, "+rampingCount+" ramping) · "+state.log.length+" assigned total · live";
   }
 
+  // ---------- Force-next-up override ----------
+  function renderOverride(pool){
+    var ui = POOL_UI[pool];
+    var select = document.getElementById(ui.overrideSelect);
+    var status = document.getElementById(ui.overrideStatus);
+    if(!select || !status) return;
+    if(document.activeElement === select) return; // don't collapse an open dropdown mid-poll
+
+    var list = activeAes(pool);
+    var currentId = (state.nextOverride && state.nextOverride[pool]) || "";
+    var previousPick = select.value;
+    select.innerHTML = '<option value="">Select an AE…</option>' + list.map(function(a){
+      return '<option value="'+a.id+'">'+escapeHtml(a.name)+'</option>';
+    }).join("");
+    // Keep an unsaved pick across polls; otherwise mirror the live override.
+    var stillValid = list.some(function(a){ return a.id===previousPick; });
+    select.value = (stillValid ? previousPick : currentId) || "";
+    select.disabled = list.length === 0;
+
+    var queue = (state.nextQueue && state.nextQueue[pool]) || [];
+    var forcedAe = currentId ? state.aes.find(function(a){ return a.id===currentId; }) : null;
+    if(forcedAe && forcedAe.active && forcedAe.pool===pool){
+      status.className = "override-status set";
+      status.textContent = "Forced: " + forcedAe.name + " takes the next booking in this pool, then the rotation resumes.";
+    } else if(currentId){
+      // The stored id no longer resolves (deactivated, moved pool, removed).
+      // The server already ignores it — say so rather than implying it holds.
+      status.className = "override-status stale";
+      status.textContent = "The AE queued up here is no longer active in this pool, so the override was dropped — the normal queue applies.";
+    } else {
+      status.className = "override-status";
+      status.textContent = queue.length
+        ? ("No override — " + queue[0].name + " is next up by weighting.")
+        : "No override set.";
+    }
+  }
+
   // ---------- Admin table ----------
   function renderAdmin(pool){
     var ui = POOL_UI[pool];
@@ -611,6 +736,7 @@
       renderLog(pool);
       renderStats(pool);
       renderAdmin(pool);
+      renderOverride(pool);
       renderCalendarPanel(pool);
       updateSpinReady(pool);
     });
@@ -716,6 +842,28 @@
       });
     });
     nameInput.addEventListener("keydown", function(e){ if(e.key==="Enter") addBtn.click(); });
+
+    var overrideSetBtn = document.getElementById(ui.overrideSetBtn);
+    var overrideClearBtn = document.getElementById(ui.overrideClearBtn);
+    if(overrideSetBtn) overrideSetBtn.addEventListener("click", function(){
+      var select = document.getElementById(ui.overrideSelect);
+      var aeId = select ? select.value : "";
+      var statusEl = document.getElementById(ui.overrideStatus);
+      if(!aeId){
+        if(statusEl) statusEl.textContent = "Pick an AE first.";
+        return;
+      }
+      adminApi("/api/admin/next-override", { method:"POST", body:{ pool:pool, aeId:aeId } })
+        .then(fetchState)
+        .catch(function(err){ if(statusEl) statusEl.textContent = err.message; });
+    });
+    if(overrideClearBtn) overrideClearBtn.addEventListener("click", function(){
+      adminApi("/api/admin/next-override", { method:"POST", body:{ pool:pool, aeId:null } }).then(function(){
+        var select = document.getElementById(ui.overrideSelect);
+        if(select) select.value = "";
+        return fetchState();
+      });
+    });
 
     document.getElementById(ui.factorToggle).addEventListener("change", function(e){
       adminApi("/api/admin/factor-hold", { method:"POST", body:{ pool:pool, value: e.target.checked } }).then(fetchState);

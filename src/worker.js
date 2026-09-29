@@ -3,6 +3,8 @@ import {
   overallHoldRate, effectiveWeights, pickNextAe, previewQueue, newId,
   json, requireAdmin, requireSyncToken, requireAdminOrSyncToken,
   resetCycleCounters, cycleEndsAt, inCurrentCycle,
+  takeNextOverride, clearNextOverride,
+  needsActivityCheck, applyActivity,
   PAST_DISCOVERY_STAGES, POOLS, CYCLE_DAYS
 } from "./lib/state.js";
 
@@ -50,7 +52,10 @@ const routes = {
     if (!bdrName) return json({ error: "bdrName is required" }, { status: 400 });
 
     const state = await loadState(env);
-    const winner = pickNextAe(state, pool);
+    // A pending admin override wins this one booking and is consumed here;
+    // every later spin falls straight back to the deficit queue.
+    const forced = takeNextOverride(state, pool);
+    const winner = forced || pickNextAe(state, pool);
     if (!winner) return json({ error: "No active AEs configured for this pool" }, { status: 409 });
 
     winner.bookedRR += 1;
@@ -58,11 +63,12 @@ const routes = {
       id: newId("log"), aeId: winner.id, name: winner.name, bdrName, pool,
       accountName: "", held: false, lost: false, flagged: false,
       oppId: null, oppName: null, oppStage: null,
+      forced: !!forced,
       ts: new Date().toISOString()
     };
     state.log.unshift(entry);
     await saveState(env, state);
-    return json({ entry, winner: { id: winner.id, name: winner.name } });
+    return json({ entry, winner: { id: winner.id, name: winner.name }, forced: !!forced });
   },
 
   "POST /api/log/account": async ({ request, env }) => {
@@ -83,6 +89,49 @@ const routes = {
     const entry = findLogEntry(state, body.id);
     if (!entry) return json({ error: "Log entry not found" }, { status: 404 });
     entry.flagged = !entry.flagged;
+    await saveState(env, state);
+    return json({ entry });
+  },
+
+  // Retroactively move an assignment to a different AE. The counters follow
+  // the deal: the old owner gives back the booked (and held) credit and the
+  // new owner takes it on — but only when the entry falls inside the current
+  // weighting cycle, mirroring the delete path. Reassigning an older booking
+  // must not move counters the present cycle never counted in the first place.
+  "POST /api/log/reassign": async ({ request, env }) => {
+    const unauthorized = requireAdmin(request, env);
+    if (unauthorized) return unauthorized;
+    const body = await readJson(request);
+    if (!body) return json({ error: "Invalid JSON body" }, { status: 400 });
+    const state = await loadState(env);
+    const entry = findLogEntry(state, body.id);
+    if (!entry) return json({ error: "Log entry not found" }, { status: 404 });
+    const target = findAe(state, body.aeId);
+    if (!target) return json({ error: "AE not found" }, { status: 404 });
+    if (target.id === entry.aeId) return json({ entry });
+
+    // May be undefined if the original AE has since been removed from the
+    // roster — the deal still moves, there is just nothing to debit.
+    const previous = findAe(state, entry.aeId);
+    if (inCurrentCycle(state, entry)) {
+      if (previous) {
+        previous.bookedRR = Math.max(0, previous.bookedRR - 1);
+        if (entry.held) previous.heldRR = Math.max(0, previous.heldRR - 1);
+      }
+      target.bookedRR += 1;
+      if (entry.held) target.heldRR += 1;
+    }
+
+    entry.reassignedFrom = (previous && previous.name) || entry.name;
+    entry.reassignedAt = new Date().toISOString();
+    entry.aeId = target.id;
+    entry.name = target.name;
+    // The deal belongs to whichever rotation its new owner books for, so the
+    // entry follows them across pools — otherwise a cross-pool move would
+    // leave a core deal sitting in the ramping log and counting against the
+    // wrong pool's hold rate.
+    entry.pool = target.pool;
+
     await saveState(env, state);
     return json({ entry });
   },
@@ -137,10 +186,40 @@ const routes = {
     }
     if (body.action === "remove") {
       state.aes = state.aes.filter(a => a.id !== body.id);
+      // Drop any override queued up for the AE who just left the roster.
+      POOLS.forEach(p => { if (state.nextOverride[p] === body.id) clearNextOverride(state, p); });
       await saveState(env, state);
       return json({ ok: true });
     }
     return json({ error: "Unknown action" }, { status: 400 });
+  },
+
+  // Queue a specific AE to take the next booking in one pool, or clear a
+  // pending override by sending a null/absent aeId.
+  "POST /api/admin/next-override": async ({ request, env }) => {
+    const unauthorized = requireAdmin(request, env);
+    if (unauthorized) return unauthorized;
+    const body = await readJson(request);
+    if (!body) return json({ error: "Invalid JSON body" }, { status: 400 });
+    const pool = normalizePool(body.pool);
+    const state = await loadState(env);
+
+    if (!body.aeId) {
+      clearNextOverride(state, pool);
+      await saveState(env, state);
+      return json({ ok: true, nextOverride: state.nextOverride });
+    }
+
+    const ae = findAe(state, body.aeId);
+    if (!ae) return json({ error: "AE not found" }, { status: 404 });
+    // Refuse rather than silently no-op: an override that resolves to nothing
+    // would leave the admin believing the next deal is routed when it is not.
+    if (ae.pool !== pool) return json({ error: "That AE is not in this pool" }, { status: 400 });
+    if (!ae.active) return json({ error: "That AE is not currently in the round robin" }, { status: 400 });
+
+    state.nextOverride[pool] = ae.id;
+    await saveState(env, state);
+    return json({ ok: true, nextOverride: state.nextOverride, ae: { id: ae.id, name: ae.name } });
   },
 
   "POST /api/admin/factor-hold": async ({ request, env }) => {
@@ -194,7 +273,21 @@ const routes = {
     const pendingAccountNames = Array.from(new Set(
       state.log.filter(e => !e.oppId && (e.accountName || "").trim()).map(e => e.accountName.trim())
     ));
-    return json({ aeNames, pendingAccountNames });
+    // Linked deals whose intro meeting / intro emails aren't settled yet.
+    // The sync job re-reads these from Salesforce every run (see
+    // needsActivityCheck) and posts them back as `activity`.
+    const now = Date.now();
+    const trackedOpps = state.log.filter(e => needsActivityCheck(e, now)).map(e => ({
+      oppId: e.oppId,
+      accountName: e.accountName,
+      aeName: e.name,
+      bdrName: e.bdrName,
+      assignedAt: e.ts,
+      introMeetingAt: e.introMeetingAt || null,
+      hasBdrIntroEmail: !!e.bdrIntroEmail,
+      hasAeIntroEmail: !!e.aeIntroEmail
+    }));
+    return json({ aeNames, pendingAccountNames, trackedOpps });
   },
 
   "POST /api/admin/sync": async ({ request, env }) => {
@@ -263,11 +356,25 @@ const routes = {
       });
     }
 
+    // Runs after `matches`, so an opp linked in this same payload can carry
+    // its activity in the same request.
+    let activityUpdated = 0;
+    if (Array.isArray(body.activity)) {
+      const checkedAt = body.asOf || new Date().toISOString();
+      body.activity.forEach(a => {
+        if (!a || !a.oppId) return;
+        state.log.filter(e => e.oppId === a.oppId).forEach(e => {
+          applyActivity(e, a, checkedAt);
+          activityUpdated++;
+        });
+      });
+    }
+
     if (body.asOf) state.sfPullDate = body.asOf;
     await saveState(env, state);
 
     return json({
-      matchedCount, heldCount, lostCount, aeUpdated,
+      matchedCount, heldCount, lostCount, aeUpdated, activityUpdated,
       pendingAccountNames: Array.from(new Set(
         state.log.filter(e => !e.oppId && (e.accountName || "").trim()).map(e => e.accountName.trim())
       ))

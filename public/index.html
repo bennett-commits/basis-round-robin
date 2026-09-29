@@ -43,7 +43,7 @@
   <section class="view active" id="view-spin">
     <div class="spin-layout">
       <div class="wheel-card">
-        <div class="reel-eyebrow">Next up</div>
+        <div class="reel-eyebrow" id="reelEyebrow">Next up</div>
         <div class="reel-wrap" id="reelWrap">
           <div class="reel-window">
             <div class="reel-track" id="reelTrack"></div>
@@ -75,11 +75,11 @@
 
     <div class="log-card" style="margin-top:20px;">
       <h2>Recent assignments</h2>
-      <p class="log-sub">Shared live across everyone on this page. Add the account name once it's booked — the hourly Salesforce sync links it to an opp and updates status automatically. Spun by accident? Press 🚩 to flag it for an admin to clear.</p>
+      <p class="log-sub">Shared live across everyone on this page. Add the account name once it's booked — the hourly Salesforce sync links it to an opp and updates status automatically, then keeps checking the opp for the intro meeting date and the BDR and AE intro emails. Spun by accident? Press 🚩 to flag it for an admin to clear.</p>
       <div class="ae-table-wrap" style="box-shadow:none;">
-        <table class="ae-table" style="min-width:620px;">
+        <table class="ae-table" style="min-width:960px;">
           <thead>
-            <tr><th>Time</th><th>BDR</th><th>AE</th><th>Account name</th><th>Status</th><th></th></tr>
+            <tr><th>Time</th><th>BDR</th><th>AE</th><th>Account name</th><th>Intro meeting</th><th>BDR intro email</th><th>AE intro email</th><th>Status</th><th></th></tr>
           </thead>
           <tbody id="logRows"></tbody>
         </table>
@@ -94,7 +94,7 @@
   <section class="view" id="view-ramping">
     <div class="spin-layout">
       <div class="wheel-card">
-        <div class="reel-eyebrow">Next up</div>
+        <div class="reel-eyebrow" id="reelEyebrowRamping">Next up</div>
         <div class="reel-wrap" id="reelWrapRamping">
           <div class="reel-window">
             <div class="reel-track" id="reelTrackRamping"></div>
@@ -126,11 +126,11 @@
 
     <div class="log-card" style="margin-top:20px;">
       <h2>Recent assignments</h2>
-      <p class="log-sub">Separate rotation from the core AE pool — shared live across everyone on this page. Add the account name once it's booked — the hourly Salesforce sync links it to an opp and updates status automatically. Spun by accident? Press 🚩 to flag it for an admin to clear.</p>
+      <p class="log-sub">Separate rotation from the core AE pool — shared live across everyone on this page. Add the account name once it's booked — the hourly Salesforce sync links it to an opp and updates status automatically, then keeps checking the opp for the intro meeting date and the BDR and AE intro emails. Spun by accident? Press 🚩 to flag it for an admin to clear.</p>
       <div class="ae-table-wrap" style="box-shadow:none;">
-        <table class="ae-table" style="min-width:620px;">
+        <table class="ae-table" style="min-width:960px;">
           <thead>
-            <tr><th>Time</th><th>BDR</th><th>AE</th><th>Account name</th><th>Status</th><th></th></tr>
+            <tr><th>Time</th><th>BDR</th><th>AE</th><th>Account name</th><th>Intro meeting</th><th>BDR intro email</th><th>AE intro email</th><th>Status</th><th></th></tr>
           </thead>
           <tbody id="logRowsRamping"></tbody>
         </table>
@@ -156,6 +156,18 @@
       <label for="factorHoldToggle"><b>Factor hold rate into weighting</b> — automatically discounts an AE's effective share when their Booked→Held conversion (via this tool) falls below the team average, and boosts AEs converting above it.</label>
     </div>
 
+    <div class="override-card">
+      <div class="override-head">
+        <b>Force next assignment</b>
+        <span class="override-note">One-shot — applies to the very next Core booking, then the normal rotation resumes. The forced booking still counts toward Booked (RR), so target shares stay honest over the cycle.</span>
+      </div>
+      <div class="override-controls">
+        <select id="overrideSelect" class="num-input override-select"></select>
+        <button class="btn-secondary" id="overrideSetBtn">Set next up</button>
+        <button class="btn-secondary" id="overrideClearBtn">Clear</button>
+      </div>
+      <div class="override-status" id="overrideStatus">—</div>
+    </div>
     <div class="ae-table-wrap">
       <table class="ae-table">
         <thead>
@@ -188,6 +200,19 @@
     <div class="toggle-row" style="margin-bottom:16px; width:fit-content;">
       <div class="switch"><input type="checkbox" id="factorHoldToggleRamping" /><span class="slider-track"></span></div>
       <label for="factorHoldToggleRamping"><b>Factor hold rate into weighting</b> — same logic as the core pool, computed separately within the Ramping Reps roster only.</label>
+    </div>
+
+    <div class="override-card">
+      <div class="override-head">
+        <b>Force next assignment</b>
+        <span class="override-note">One-shot — applies to the very next Ramping Reps booking, then the normal rotation resumes. The forced booking still counts toward Booked (RR), so target shares stay honest over the cycle.</span>
+      </div>
+      <div class="override-controls">
+        <select id="overrideSelectRamping" class="num-input override-select"></select>
+        <button class="btn-secondary" id="overrideSetBtnRamping">Set next up</button>
+        <button class="btn-secondary" id="overrideClearBtnRamping">Clear</button>
+      </div>
+      <div class="override-status" id="overrideStatusRamping">—</div>
     </div>
 
     <div class="ae-table-wrap">

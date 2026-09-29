@@ -29,6 +29,7 @@ export const CYCLE_MS = CYCLE_DAYS * 24 * 60 * 60 * 1000;
 export function defaultState() {
   return {
     factorHoldRate: { core: false, ramping: false },
+    nextOverride: { core: null, ramping: null },
     sfPullDate: null,
     cycleStartedAt: null,
     aes: [],
@@ -54,6 +55,7 @@ export async function loadState(env) {
   } else {
     state.factorHoldRate = Object.assign({ core: false, ramping: false }, state.factorHoldRate || {});
   }
+  state.nextOverride = Object.assign({ core: null, ramping: null }, state.nextOverride || {});
   state.aes = (state.aes || []).map(a => ({ pool: "core", ...a }));
   state.log = (state.log || []).map(e => ({ pool: "core", ...e }));
 
@@ -168,6 +170,37 @@ export function pickNextAe(state, pool) {
   return best;
 }
 
+// --- Manual "next up" override -------------------------------------------
+// An admin can force one specific AE to take the next booking in a pool,
+// bypassing the deficit queue. The override is deliberately ONE-SHOT: the
+// next booking in that pool consumes it and the normal rotation resumes
+// immediately. The forced booking still increments bookedRR, so the deficit
+// queue hands that AE correspondingly less over the following spins — an
+// override changes the ORDER of assignments, never anyone's target share.
+//
+// The stored id is re-validated on every read rather than trusted, so an AE
+// who is deactivated, moved to the other pool, or deleted while queued up
+// simply voids the override instead of wedging the rotation.
+export function resolveNextOverride(state, pool) {
+  const id = state.nextOverride && state.nextOverride[pool];
+  if (!id) return null;
+  const ae = findAe(state, id);
+  if (!ae || !ae.active || ae.pool !== pool) return null;
+  return ae;
+}
+
+export function clearNextOverride(state, pool) {
+  if (state.nextOverride) state.nextOverride[pool] = null;
+}
+
+// Resolve and consume in one step — used by the booking path. Clears even a
+// stale/invalid id so a dead override can't linger in the document forever.
+export function takeNextOverride(state, pool) {
+  const ae = resolveNextOverride(state, pool);
+  clearNextOverride(state, pool);
+  return ae;
+}
+
 // Simulates the next `count` picks within one pool without touching real
 // state — lets the frontend show an upcoming queue (next-up + on-deck) that's
 // consistent for everyone, while the actual booking still re-runs
@@ -181,7 +214,16 @@ export function previewQueue(state, pool, count) {
   list.forEach(a => { bookedCopy[a.id] = a.bookedRR; });
 
   const queue = [];
-  for (let step = 0; step < count; step++) {
+  // A pending override owns the first slot; the rest of the queue is then
+  // simulated from the state that booking would leave behind, so the on-deck
+  // names shown are the ones that will really come next.
+  const forced = resolveNextOverride(state, pool);
+  if (forced) {
+    queue.push({ id: forced.id, name: forced.name, forced: true });
+    bookedCopy[forced.id] += 1;
+  }
+
+  for (let step = queue.length; step < count; step++) {
     const totalAssigned = list.reduce((s, a) => s + bookedCopy[a.id], 0);
     let best = null, bestDeficit = -Infinity;
     list.forEach((a, i) => {
@@ -232,3 +274,51 @@ export function requireSyncToken(request, env) {
 }
 
 export const PAST_DISCOVERY_STAGES = ["discovery", "evaluation", "legal & pricing", "pilot", "closed won"];
+
+// --- Intro activity (meeting date + intro emails) -------------------------
+// Three per-deal facts the sync job reads off Salesforce once an entry is
+// linked to an opp: when the first meeting is on the calendar, whether the
+// BDR sent the contact an intro email, and whether the AE followed up with a
+// pre-meeting discovery email (ERP, AI readiness, ...). The worker cannot
+// query Salesforce itself, so linked entries are handed back to the sync job
+// on every run until all three are settled — emails typically land hours or
+// days AFTER the opp is first matched, so checking only at match time would
+// leave them blank forever.
+export const ACTIVITY_TRACK_DAYS = 45;
+
+function settledMeeting(entry, now) {
+  // A meeting still in the future can be rescheduled, so keep re-reading it
+  // until it has actually passed.
+  return !!entry.introMeetingAt && Date.parse(entry.introMeetingAt) <= now;
+}
+
+export function needsActivityCheck(entry, now) {
+  if (!entry.oppId || entry.flagged) return false;
+  if (now - Date.parse(entry.ts) > ACTIVITY_TRACK_DAYS * 24 * 60 * 60 * 1000) return false;
+  return !settledMeeting(entry, now) || !entry.bdrIntroEmail || !entry.aeIntroEmail;
+}
+
+function normalizeEmail(value) {
+  if (!value || typeof value !== "object" || !value.sentAt) return null;
+  return {
+    sentAt: String(value.sentAt),
+    subject: value.subject ? String(value.subject).slice(0, 200) : null,
+    taskId: value.taskId ? String(value.taskId) : null
+  };
+}
+
+// Apply one activity record from the sync job. Emails are sticky: once one
+// has been found, a later run that happens not to see it (deleted Task,
+// query flake) must not un-send it. The meeting date overwrites, because a
+// reschedule is real information.
+export function applyActivity(entry, record, checkedAt) {
+  if (Object.prototype.hasOwnProperty.call(record, "introMeetingAt") && record.introMeetingAt) {
+    const t = Date.parse(record.introMeetingAt);
+    if (!isNaN(t)) entry.introMeetingAt = new Date(t).toISOString();
+  }
+  const bdr = normalizeEmail(record.bdrIntroEmail);
+  if (bdr && !entry.bdrIntroEmail) entry.bdrIntroEmail = bdr;
+  const ae = normalizeEmail(record.aeIntroEmail);
+  if (ae && !entry.aeIntroEmail) entry.aeIntroEmail = ae;
+  entry.activityCheckedAt = checkedAt;
+}

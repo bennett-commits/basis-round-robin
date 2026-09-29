@@ -54,6 +54,67 @@ So the per-AE counters (`bookedRR` / `heldRR`) reset to zero every 30 days:
 
 The admin tab shows the current cycle window and the days remaining.
 
+## Manual admin overrides
+
+Two escape hatches for when reality diverges from the rotation. Both live in
+the admin tab and both require the admin password.
+
+### Force the next assignment
+
+Per pool, an admin can pick who takes the **next** booking, bypassing the
+deficit queue (`POST /api/admin/next-override` with `{pool, aeId}`; send a null
+`aeId` to clear).
+
+- It is **one-shot**. The next booking in that pool consumes it and the normal
+  rotation resumes — there is no sticky "always pick this person" mode.
+- The forced booking still increments `bookedRR`, so the deficit queue hands
+  that AE correspondingly less over the following spins. An override changes
+  the *order* of assignments, never anyone's target share over the cycle.
+- The stored id is re-validated on every read, so an AE who is deactivated,
+  moved to the other pool, or removed while queued up simply voids the
+  override rather than wedging the rotation. Removing an AE clears it outright.
+- It is visible to everyone, not just the admin who set it: the spin reel
+  reads "Next up · set by admin", and the resulting log entry carries a
+  `Manual` pill.
+
+### Retroactively reassign a deal
+
+The AE column in the admin assignment log (and in Flagged for review) is a
+dropdown — changing it moves that deal to another AE
+(`POST /api/log/reassign` with `{id, aeId}`).
+
+- The counters follow the deal: the old owner is debited `bookedRR` (and
+  `heldRR` if it had already held), the new owner credited. As with deletes,
+  this only applies when the entry is inside the current weighting cycle, so
+  reassigning an older booking moves the record without distorting counters
+  the present cycle never included.
+- Reassigning **across pools** is allowed — the options are grouped by pool so
+  it is a deliberate choice — and the entry's `pool` follows its new owner, so
+  a moved deal doesn't sit in the wrong rotation's log or hold rate.
+- The entry keeps `reassignedFrom` / `reassignedAt`, surfaced in the log as
+  "↳ reassigned from <name>" so the original attribution isn't silently lost.
+- An entry whose original AE has since been removed from the roster shows a
+  "(no longer on roster)" placeholder rather than defaulting to whoever sits
+  first in the list.
+
+## Intro activity columns
+
+Recent assignments shows three extra columns per deal, filled in by the
+Salesforce sync once the entry is linked to an opp:
+
+- **Intro meeting**: the first meeting date on the opp (bold while upcoming).
+- **BDR intro email**: the BDR's email introducing the contact to the AE.
+- **AE intro email**: the AE's pre-meeting email with discovery questions
+  (ERP, AI readiness, ...).
+
+The worker can't query Salesforce itself, so `GET /api/admin/pending` returns
+`trackedOpps`, meaning linked entries (last 45 days, not flagged) whose meeting
+is still in the future or that are missing either email. The sync job re-reads
+those every run and posts them back as `activity` on `/api/admin/sync`.
+Found emails are sticky: a later run that doesn't see one won't clear it. The
+meeting date overwrites, so reschedules show up. A cell reads "…" until the
+first check, then "Not yet" / "Not set" if nothing was found.
+
 ## One-time setup
 
 ### 1. Push this to GitHub

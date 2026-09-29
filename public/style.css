@@ -169,6 +169,12 @@
   .pill-held{ background:var(--accent); color:#fff; }
   .pill-lost{ background:var(--critical-soft); color:var(--critical); }
   .pill-flagged{ background:var(--warn-soft); color:var(--warn); }
+  .pill-sent{ background:var(--accent-soft); color:var(--accent-strong); }
+  .pill-not-sent{ background:var(--warn-soft); color:var(--warn); }
+  .activity-cell{ white-space:nowrap; font-size:12.5px; }
+  .activity-cell.muted{ color:var(--ink-soft); }
+  .activity-cell.upcoming{ font-weight:600; }
+  .pill-manual{ background:var(--accent-soft); color:var(--accent-strong); }
   .empty-log{ font-size:13px; color:var(--ink-soft); padding:16px 0; text-align:center; }
   .account-input{ width:140px !important; }
   .opp-link-note{ font-size:11px; color:var(--ink-soft); margin-top:2px; }
@@ -249,6 +255,21 @@
   .admin-footnote b{ color:var(--ink); }
 
   .weight-sum-warning{ font-size:12.5px; color:var(--warn); margin-top:10px; font-weight:600; }
+
+  /* Force-next-up override card (admin) */
+  .override-card{
+    background:var(--surface); border:1px solid var(--line); border-radius:10px;
+    padding:12px 14px; box-shadow:var(--shadow); margin-bottom:16px; max-width:760px;
+  }
+  .override-head{ display:flex; flex-wrap:wrap; align-items:baseline; gap:8px; }
+  .override-head b{ font-size:13px; }
+  .override-note{ font-size:12.5px; color:var(--ink-soft); line-height:1.35; flex:1 1 320px; min-width:0; }
+  .override-controls{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:10px; }
+  .override-select{ min-width:200px; }
+  .override-status{ font-size:12.5px; color:var(--ink-soft); margin-top:8px; }
+  .override-status.set{ color:var(--accent-strong); font-weight:600; }
+  .override-status.stale{ color:var(--warn); font-weight:600; }
+  .reassign-select{ min-width:150px; font-weight:600; }
 
   ::selection{ background:var(--accent-soft); }
 
