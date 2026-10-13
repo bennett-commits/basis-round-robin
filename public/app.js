@@ -16,7 +16,7 @@
   function savePrefs() {
     try {
       localStorage.setItem("bdrTrackerFilters", JSON.stringify({
-        timing: $("fTiming").value, status: $("fStatus").value, sortDir
+        timing: $("fTiming").value, status: $("fStatus").value, bdrEmail: $("fBdrEmail").value, sortDir
       }));
     } catch (e) { /* storage unavailable; filters just won't persist */ }
   }
@@ -91,10 +91,12 @@
     return days >= 0 ? days : 100000 - days;
   }
 
-  // Every filter except Timing applies when `ignoreTiming` is set, so the
-  // this-week stat still counts earlier days of the week under "Upcoming".
-  function filtered(today, ignoreTiming) {
-    const timing = ignoreTiming ? "all" : $("fTiming").value;
+  // For the this-week stat, Timing and BDR-email filters are ignored: it still
+  // counts earlier days of the week under "Upcoming", and a sent/not-sent
+  // filter would pin its rate at 100% or 0%.
+  function filtered(today, forWeekStat) {
+    const timing = forWeekStat ? "all" : $("fTiming").value;
+    const bdrEmail = forWeekStat ? "all" : $("fBdrEmail").value;
     const status = $("fStatus").value;
     const bdr = $("fBdr").value;
     const ae = $("fAe").value;
@@ -105,6 +107,8 @@
         if (timing === "upcoming" && !(m.days !== null && m.days >= 0)) return false;
         if (timing === "past" && !(m.days !== null && m.days < 0)) return false;
         if (status !== "all" && m.status !== status) return false;
+        if (bdrEmail === "sent" && !m.bdrIntroEmail) return false;
+        if (bdrEmail === "not_sent" && m.bdrIntroEmail) return false;
         if (bdr !== "all" && m.bdrName !== bdr) return false;
         if (ae !== "all" && m.aeName !== ae) return false;
         if (q && !(m.accountName || "").toLowerCase().includes(q)) return false;
@@ -222,9 +226,10 @@
   const prefs = readPrefs();
   if (prefs.timing) $("fTiming").value = prefs.timing;
   if (prefs.status) $("fStatus").value = prefs.status;
+  if (prefs.bdrEmail) $("fBdrEmail").value = prefs.bdrEmail;
   if (prefs.sortDir === "desc") sortDir = "desc";
 
-  ["fTiming", "fStatus", "fBdr", "fAe"].forEach(id => $(id).addEventListener("change", () => { savePrefs(); render(); }));
+  ["fTiming", "fStatus", "fBdrEmail", "fBdr", "fAe"].forEach(id => $(id).addEventListener("change", () => { savePrefs(); render(); }));
   $("fSearch").addEventListener("input", render);
   $("sortDays").querySelector("button").addEventListener("click", () => {
     sortDir = sortDir === "asc" ? "desc" : "asc";
