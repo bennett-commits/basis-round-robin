@@ -91,8 +91,10 @@
     return days >= 0 ? days : 100000 - days;
   }
 
-  function filtered(today) {
-    const timing = $("fTiming").value;
+  // Every filter except Timing applies when `ignoreTiming` is set, so the
+  // this-week stat still counts earlier days of the week under "Upcoming".
+  function filtered(today, ignoreTiming) {
+    const timing = ignoreTiming ? "all" : $("fTiming").value;
     const status = $("fStatus").value;
     const bdr = $("fBdr").value;
     const ae = $("fAe").value;
@@ -114,7 +116,20 @@
       });
   }
 
-  function renderStats(rows) {
+  // Monday..Sunday (Pacific) of the week containing `today`, as day offsets.
+  function thisWeekRange(today) {
+    const dow = new Date(dateToUtcMs(today)).getUTCDay();
+    const start = -((dow + 6) % 7);
+    return { start, end: start + 6 };
+  }
+
+  function weekLabel(today, range) {
+    const fmt = offset => new Date(dateToUtcMs(today) + offset * DAY_MS)
+      .toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric" });
+    return fmt(range.start) + "–" + fmt(range.end);
+  }
+
+  function renderStats(rows, today) {
     const stats = $("stats");
     stats.textContent = "";
     const upcoming = rows.filter(m => m.days !== null && m.days >= 0);
@@ -123,11 +138,16 @@
     const bdrSent = scope.filter(m => m.bdrIntroEmail).length;
     const aeSent = scope.filter(m => m.aeIntroEmail).length;
     const pct = (n, d) => d ? Math.round((n / d) * 100) + "%" : "—";
+    const range = thisWeekRange(today);
+    const thisWeek = filtered(today, true).filter(m => m.days !== null && m.days >= range.start && m.days <= range.end);
+    const weekSent = thisWeek.filter(m => m.bdrIntroEmail).length;
     [
+      ["BDR intro sent · meetings this week (" + weekLabel(today, range) + ")",
+        pct(weekSent, thisWeek.length) + " · " + weekSent + " of " + thisWeek.length],
       ["Meetings shown", String(rows.length)],
       ["Next 7 days", String(rows.filter(m => m.days !== null && m.days >= 0 && m.days <= 7).length)],
       ["BDR intro sent (" + scopeLabel + ")", bdrSent + " · " + pct(bdrSent, scope.length)],
-      ["AD follow-up sent (" + scopeLabel + ")", aeSent + " · " + pct(aeSent, scope.length)],
+      ["AE follow-up sent (" + scopeLabel + ")", aeSent + " · " + pct(aeSent, scope.length)],
       ["Held", String(rows.filter(m => m.status === "held").length)]
     ].forEach(([label, value]) => {
       const card = el("div", "stat");
@@ -169,7 +189,7 @@
       tbody.appendChild(tr);
     });
     $("empty").hidden = rows.length > 0;
-    renderStats(rows);
+    renderStats(rows, today);
     $("sortArrow").textContent = sortDir === "asc" ? "↑" : "↓";
     $("sortDays").setAttribute("aria-sort", sortDir === "asc" ? "ascending" : "descending");
   }

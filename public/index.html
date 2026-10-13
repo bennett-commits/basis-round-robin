@@ -37,8 +37,8 @@
     <label>BDR
       <select id="fBdr"><option value="all">All BDRs</option></select>
     </label>
-    <label>AD
-      <select id="fAe"><option value="all">All ADs</option></select>
+    <label>AE
+      <select id="fAe"><option value="all">All AEs</option></select>
     </label>
     <label class="grow">Search
       <input type="search" id="fSearch" placeholder="Account name" autocomplete="off" />
@@ -51,13 +51,13 @@
         <tr>
           <th>Account</th>
           <th>BDR</th>
-          <th>AD</th>
+          <th>AE</th>
           <th>Initial meeting</th>
           <th class="sortable" id="sortDays" aria-sort="ascending">
             <button type="button">Days until <span class="sort-arrow" id="sortArrow">↑</span></button>
           </th>
           <th>BDR intro email</th>
-          <th>AD follow-up email</th>
+          <th>AE follow-up email</th>
           <th>Status</th>
         </tr>
       </thead>
@@ -70,7 +70,7 @@
     Every opportunity with Pipeline Source = BDR whose first meeting is upcoming or in the last 30 days.
     Synced from Salesforce every 6 hours. <strong>Held</strong> = the opp reached Discovery.
     <strong>No show</strong> = closed lost without ever reaching Discovery.
-    The AD follow-up email is the Account Director's pre-meeting email asking discovery questions.
+    The AE follow-up email is the AE's pre-meeting email asking discovery questions.
   </p>
 </div>
 <script src="app.js"></script>

@@ -1,8 +1,7 @@
 # Basis BDR Meetings Tracker
 
-A shared page listing every BDR-booked meeting: who booked it, which Account
-Director (AD) owns it, when the initial meeting is and how many days away,
-whether the BDR sent the intro email, whether the AD sent their pre-meeting
+A shared page listing every BDR-booked meeting: who booked it, which AE owns it, when the initial meeting is and how many days away,
+whether the BDR sent the intro email, whether the AE sent their pre-meeting
 follow-up email, and whether the meeting is booked, held or a no-show.
 
 This app used to be the BDR → AE round robin. That was retired on
