@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "Basis BDR to AE round robin tool with a live shared backend and hourly Salesforce sync.",
+  "description": "Basis BDR meetings tracker: every BDR-booked meeting, its intro emails and booked/held status, synced from Salesforce every 6 hours.",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy"

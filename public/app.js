@@ -1,877 +1,216 @@
-(function(){
+(function () {
   "use strict";
-  var PALETTE = ["#2F6F5E","#B8863B","#5B7FB0","#A65E8C","#6B8E4E","#B4483F","#3F8FA0","#8C6B3F"];
-  var POLL_MS = 4000;
-  var FIREWORK_MS = 1700;
-  var POOLS = ["core", "ramping"];
 
-  // Maps each pool to its own set of DOM element ids, so every render/handler
-  // function below just takes a `pool` argument instead of being duplicated.
-  var POOL_UI = {
-    core: {
-      reelWrap:"reelWrap", reelTrack:"reelTrack", reelEmpty:"reelEmpty", reelFullName:"reelFullName",
-      reelEyebrow:"reelEyebrow",
-      overrideSelect:"overrideSelect", overrideSetBtn:"overrideSetBtn",
-      overrideClearBtn:"overrideClearBtn", overrideStatus:"overrideStatus",
-      bdrInput:"bdrNameInput", bdrHint:"bdrHint", bdrSuggestions:"bdrSuggestions",
-      spinBtn:"spinBtn", resultSlot:"resultSlot",
-      logRows:"logRows", emptyLog:"emptyLog", statStrip:"statStrip",
-      tableBody:"aeTableBody", weightWarning:"weightWarning", factorToggle:"factorHoldToggle",
-      newAeName:"newAeName", addAeBtn:"addAeBtn",
-      calendarPanelTitle:"calendarPanelTitle", calendarPanelOpenLink:"calendarPanelOpenLink",
-      calendarEmpty:"calendarEmpty", calendarIframe:"calendarIframe"
-    },
-    ramping: {
-      reelWrap:"reelWrapRamping", reelTrack:"reelTrackRamping", reelEmpty:"reelEmptyRamping", reelFullName:"reelFullNameRamping",
-      reelEyebrow:"reelEyebrowRamping",
-      overrideSelect:"overrideSelectRamping", overrideSetBtn:"overrideSetBtnRamping",
-      overrideClearBtn:"overrideClearBtnRamping", overrideStatus:"overrideStatusRamping",
-      bdrInput:"bdrNameInputRamping", bdrHint:"bdrHintRamping", bdrSuggestions:"bdrSuggestionsRamping",
-      spinBtn:"spinBtnRamping", resultSlot:"resultSlotRamping",
-      logRows:"logRowsRamping", emptyLog:"emptyLogRamping", statStrip:"statStripRamping",
-      tableBody:"aeTableBodyRamping", weightWarning:"weightWarningRamping", factorToggle:"factorHoldToggleRamping",
-      newAeName:"newAeNameRamping", addAeBtn:"addAeBtnRamping",
-      calendarPanelTitle:"calendarPanelTitleRamping", calendarPanelOpenLink:"calendarPanelOpenLinkRamping",
-      calendarEmpty:"calendarEmptyRamping", calendarIframe:"calendarIframeRamping"
+  const TZ = "America/Los_Angeles";
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  let meetings = [];
+  let sortDir = "asc";
+
+  const $ = id => document.getElementById(id);
+
+  function readPrefs() {
+    try { return JSON.parse(localStorage.getItem("bdrTrackerFilters") || "{}"); }
+    catch (e) { return {}; }
+  }
+  function savePrefs() {
+    try {
+      localStorage.setItem("bdrTrackerFilters", JSON.stringify({
+        timing: $("fTiming").value, status: $("fStatus").value, sortDir
+      }));
+    } catch (e) { /* storage unavailable; filters just won't persist */ }
+  }
+
+  // Today's calendar date in Pacific, as YYYY-MM-DD.
+  function todayPacific() {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" })
+      .format(new Date());
+  }
+
+  function dateToUtcMs(ymd) {
+    const [y, m, d] = ymd.split("-").map(Number);
+    return Date.UTC(y, m - 1, d);
+  }
+
+  function daysUntil(meetingDate, today) {
+    if (!meetingDate) return null;
+    return Math.round((dateToUtcMs(meetingDate) - dateToUtcMs(today)) / DAY_MS);
+  }
+
+  function fmtMeeting(m) {
+    if (!m.meetingDate) return "—";
+    const [y, mo, d] = m.meetingDate.split("-").map(Number);
+    const datePart = new Date(Date.UTC(y, mo - 1, d)).toLocaleDateString("en-US",
+      { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" });
+    if (!m.meetingAt) return datePart;
+    const timePart = new Date(m.meetingAt).toLocaleTimeString("en-US",
+      { timeZone: TZ, hour: "numeric", minute: "2-digit" });
+    return datePart + " · " + timePart + " PT";
+  }
+
+  function fmtShortDate(iso) {
+    return new Date(iso).toLocaleDateString("en-US", { timeZone: TZ, month: "short", day: "numeric" });
+  }
+
+  function daysLabel(n) {
+    if (n === null) return "—";
+    if (n === 0) return "Today";
+    if (n === 1) return "Tomorrow";
+    if (n > 0) return n + " days";
+    if (n === -1) return "Yesterday";
+    return Math.abs(n) + " days ago";
+  }
+
+  function el(tag, cls, text) {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  function emailCell(email, days) {
+    const td = el("td");
+    if (email) {
+      const pill = el("span", "pill ok", "Sent " + fmtShortDate(email.sentAt));
+      if (email.subject) pill.title = email.subject;
+      td.appendChild(pill);
+    } else if (days !== null && days >= 0) {
+      td.appendChild(el("span", "pill warn", "Not yet"));
+    } else {
+      td.appendChild(el("span", "pill muted", "None"));
     }
-  };
-
-  var state = { factorHoldRate:{core:false,ramping:false}, nextOverride:{core:null,ramping:null}, sfPullDate:null, cycleStartedAt:null, cycleEndsAt:null, aes:[], log:[], effectiveWeights:{core:{},ramping:{}}, overallHoldRate:{core:null,ramping:null}, nextQueue:{core:[],ramping:[]} };
-  var booking = { core:false, ramping:false };
-  var reelAnimating = { core:false, ramping:false };
-  var adminPassword = sessionStorage.getItem("rr_admin_password") || null;
-  var pollTimer = null;
-
-  function colorFor(idx){ return PALETTE[idx % PALETTE.length]; }
-  function activeAes(pool){ return state.aes.filter(function(a){ return a.active && a.pool===pool; }); }
-
-  function escapeHtml(s){
-    return String(s).replace(/[&<>"']/g, function(c){
-      return ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c];
-    });
+    return td;
   }
 
-  // ---------- API ----------
-  function api(path, opts){
-    opts = opts || {};
-    var headers = Object.assign({ "content-type": "application/json" }, opts.headers || {});
-    return fetch(path, {
-      method: opts.method || "GET",
-      headers: headers,
-      body: opts.body ? JSON.stringify(opts.body) : undefined
-    }).then(function(res){
-      return res.json().then(function(data){
-        if(!res.ok) throw Object.assign(new Error(data.error || "Request failed"), { status: res.status, data: data });
-        return data;
+  const STATUS_LABEL = { booked: "Booked", held: "Held", no_show: "No show" };
+
+  // Default order: upcoming meetings soonest first, then past meetings most
+  // recent first. Descending reverses the whole list.
+  function sortKey(days) {
+    if (days === null) return Number.MAX_SAFE_INTEGER;
+    return days >= 0 ? days : 100000 - days;
+  }
+
+  function filtered(today) {
+    const timing = $("fTiming").value;
+    const status = $("fStatus").value;
+    const bdr = $("fBdr").value;
+    const ae = $("fAe").value;
+    const q = $("fSearch").value.trim().toLowerCase();
+    return meetings
+      .map(m => Object.assign({}, m, { days: daysUntil(m.meetingDate, today) }))
+      .filter(m => {
+        if (timing === "upcoming" && !(m.days !== null && m.days >= 0)) return false;
+        if (timing === "past" && !(m.days !== null && m.days < 0)) return false;
+        if (status !== "all" && m.status !== status) return false;
+        if (bdr !== "all" && m.bdrName !== bdr) return false;
+        if (ae !== "all" && m.aeName !== ae) return false;
+        if (q && !(m.accountName || "").toLowerCase().includes(q)) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        const diff = sortKey(a.days) - sortKey(b.days);
+        return sortDir === "asc" ? diff : -diff;
       });
-    });
   }
-  function adminApi(path, opts){
-    opts = opts || {};
-    opts.headers = Object.assign({ "x-admin-password": adminPassword || "" }, opts.headers || {});
-    return api(path, opts).catch(function(err){
-      if(err.status === 401){
-        adminPassword = null;
-        sessionStorage.removeItem("rr_admin_password");
-        document.getElementById("adminBtn").classList.remove("unlocked");
-        openGate("Your admin session expired or the password changed — log in again.");
-        return; // swallow so the caller's .then(fetchState) just re-syncs the real (unchanged) state
-      }
-      console.error(err);
-      throw err;
+
+  function renderStats(rows) {
+    const stats = $("stats");
+    stats.textContent = "";
+    const upcoming = rows.filter(m => m.days !== null && m.days >= 0);
+    const scope = upcoming.length ? upcoming : rows;
+    const scopeLabel = upcoming.length ? "upcoming" : "shown";
+    const bdrSent = scope.filter(m => m.bdrIntroEmail).length;
+    const aeSent = scope.filter(m => m.aeIntroEmail).length;
+    const pct = (n, d) => d ? Math.round((n / d) * 100) + "%" : "—";
+    [
+      ["Meetings shown", String(rows.length)],
+      ["Next 7 days", String(rows.filter(m => m.days !== null && m.days >= 0 && m.days <= 7).length)],
+      ["BDR intro sent (" + scopeLabel + ")", bdrSent + " · " + pct(bdrSent, scope.length)],
+      ["AD follow-up sent (" + scopeLabel + ")", aeSent + " · " + pct(aeSent, scope.length)],
+      ["Held", String(rows.filter(m => m.status === "held").length)]
+    ].forEach(([label, value]) => {
+      const card = el("div", "stat");
+      card.appendChild(el("div", "stat-value", value));
+      card.appendChild(el("div", "stat-label", label));
+      stats.appendChild(card);
     });
   }
 
-  function fetchState(){
-    return api("/api/state").then(function(data){
-      state = data;
+  function render() {
+    const today = todayPacific();
+    const rows = filtered(today);
+    const tbody = $("rows");
+    tbody.textContent = "";
+    rows.forEach(m => {
+      const tr = el("tr");
+
+      const acct = el("td", "acct");
+      acct.appendChild(el("div", "acct-name", m.accountName));
+      if (m.bookedAt) acct.appendChild(el("div", "sub", "Booked " + fmtShortDate(m.bookedAt)));
+      tr.appendChild(acct);
+
+      tr.appendChild(el("td", "nowrap", m.bdrName || "—"));
+      tr.appendChild(el("td", "nowrap", m.aeName || "—"));
+      tr.appendChild(el("td", "nowrap", fmtMeeting(m)));
+
+      const days = el("td", "days nowrap", daysLabel(m.days));
+      if (m.days !== null && m.days < 0) days.classList.add("past");
+      tr.appendChild(days);
+
+      tr.appendChild(emailCell(m.bdrIntroEmail, m.days));
+      tr.appendChild(emailCell(m.aeIntroEmail, m.days));
+
+      const st = el("td");
+      st.appendChild(el("span", "status " + m.status, STATUS_LABEL[m.status] || m.status));
+      if (m.stage) st.title = "Stage: " + m.stage;
+      tr.appendChild(st);
+
+      tbody.appendChild(tr);
+    });
+    $("empty").hidden = rows.length > 0;
+    renderStats(rows);
+    $("sortArrow").textContent = sortDir === "asc" ? "↑" : "↓";
+    $("sortDays").setAttribute("aria-sort", sortDir === "asc" ? "ascending" : "descending");
+  }
+
+  function fillSelect(select, values) {
+    const current = select.value;
+    while (select.options.length > 1) select.remove(1);
+    values.forEach(v => select.appendChild(new Option(v, v)));
+    if (values.includes(current)) select.value = current;
+  }
+
+  async function load() {
+    try {
+      const res = await fetch("/api/meetings", { cache: "no-store" });
+      const data = await res.json();
+      meetings = data.meetings || [];
+      $("asOf").textContent = data.asOf
+        ? "Salesforce as of " + new Date(data.asOf).toLocaleString("en-US",
+            { timeZone: TZ, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + " PT"
+        : "Waiting for the first Salesforce sync";
+      const uniq = key => Array.from(new Set(meetings.map(m => m[key]).filter(Boolean))).sort();
+      fillSelect($("fBdr"), uniq("bdrName"));
+      fillSelect($("fAe"), uniq("aeName"));
       render();
-    }).catch(function(err){
-      document.getElementById("quickStat").textContent = "Couldn't reach the server — retrying…";
-      console.error(err);
-    });
-  }
-
-  // ---------- Reel (next-up queue) ----------
-  var ROW_STEP = 80; // 70px row + 10px gap — must match .reel-row/.reel-track CSS
-
-  function colorIndexForAe(id, pool){
-    var idx = activeAes(pool).findIndex(function(a){ return a.id===id; });
-    return idx===-1 ? 0 : idx;
-  }
-
-  function renderReel(pool){
-    if(reelAnimating[pool]) return;
-    var ui = POOL_UI[pool];
-    var track = document.getElementById(ui.reelTrack);
-    var empty = document.getElementById(ui.reelEmpty);
-    var fullName = document.getElementById(ui.reelFullName);
-    var queue = (state.nextQueue && state.nextQueue[pool]) || [];
-    var eyebrow = document.getElementById(ui.reelEyebrow);
-    if(eyebrow) eyebrow.textContent = (queue[0] && queue[0].forced) ? "Next up · set by admin" : "Next up";
-    track.style.transform = "translateY(0)";
-    if(queue.length===0){
-      track.innerHTML = "";
-      empty.style.display = "block";
-      fullName.textContent = "";
-      return;
-    }
-    empty.style.display = "none";
-    fullName.textContent = queue[0].name;
-    track.innerHTML = queue.slice(0,2).map(function(item, i){
-      var cls = "reel-row q"+i;
-      var color = colorFor(colorIndexForAe(item.id, pool));
-      return '<div class="'+cls+'" style="background:'+color+'">'+escapeHtml(item.name.split(" ")[0])+'</div>';
-    }).join("");
-  }
-
-  // Big multi-burst confetti/fireworks show, full viewport — deliberately not
-  // confined to the reel box so it actually reads as a celebration. Shared
-  // across both pools; only the origin point differs.
-  function launchFireworks(originX, originY){
-    if(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    var canvas = document.getElementById("fireworksCanvas");
-    var dpr = window.devicePixelRatio || 1;
-    var w = window.innerWidth, h = window.innerHeight;
-    canvas.width = w*dpr; canvas.height = h*dpr;
-    canvas.style.width = w+"px"; canvas.style.height = h+"px";
-    var ctx = canvas.getContext("2d");
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    var bursts = [
-      { x: originX, y: originY, delay: 0 },
-      { x: originX - w*0.22, y: originY - h*0.08, delay: 140 },
-      { x: originX + w*0.22, y: originY - h*0.05, delay: 260 },
-      { x: originX - w*0.1, y: originY - h*0.16, delay: 420 }
-    ];
-    var particles = [];
-    function spawnBurst(bx, by){
-      var count = 140;
-      for(var i=0;i<count;i++){
-        var angle = (Math.PI*2*i/count) + (Math.random()*0.5 - 0.25);
-        var speed = 4 + Math.random()*7;
-        particles.push({
-          x:bx, y:by,
-          vx: Math.cos(angle)*speed,
-          vy: Math.sin(angle)*speed - 1.6,
-          size: 3 + Math.random()*3.5,
-          color: PALETTE[Math.floor(Math.random()*PALETTE.length)],
-          born: null
-        });
-      }
-    }
-
-    var totalMs = FIREWORK_MS;
-    var start = null;
-    var spawned = bursts.map(function(){ return false; });
-    function frame(ts){
-      if(start===null) start = ts;
-      var elapsed = ts - start;
-      bursts.forEach(function(b, i){
-        if(!spawned[i] && elapsed >= b.delay){ spawned[i] = true; spawnBurst(b.x, b.y); }
-      });
-      ctx.clearRect(0,0,w,h);
-      particles.forEach(function(p){
-        if(p.born===null) p.born = elapsed;
-        var age = elapsed - p.born;
-        var life = Math.max(0, 1 - age/(totalMs*0.75));
-        p.x += p.vx;
-        p.y += p.vy;
-        p.vy += 0.14;
-        p.vx *= 0.992;
-        ctx.globalAlpha = life;
-        ctx.shadowColor = p.color;
-        ctx.shadowBlur = 8;
-        ctx.fillStyle = p.color;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
-        ctx.fill();
-      });
-      ctx.shadowBlur = 0;
-      ctx.globalAlpha = 1;
-      if(elapsed < totalMs) requestAnimationFrame(frame);
-      else ctx.clearRect(0,0,w,h);
-    }
-    requestAnimationFrame(frame);
-  }
-
-  // Fireworks celebrate the booking that just happened first, then the reel
-  // makes one simple step up to reveal who's next — no roulette-style spin.
-  function playReelSpin(pool, winner, done){
-    var ui = POOL_UI[pool];
-    var track = document.getElementById(ui.reelTrack);
-    var wrap = document.getElementById(ui.reelWrap);
-    var wrapRect = wrap.getBoundingClientRect();
-    var landingX = wrapRect.left + wrapRect.width/2;
-    var landingY = wrapRect.top + 35; // current row is 70px tall, centered ~35px from window top
-
-    launchFireworks(landingX, landingY);
-
-    var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    var firstRow = track.children[0];
-    if(!firstRow || reduceMotion){
-      setTimeout(done, reduceMotion ? 0 : 500);
-      return;
-    }
-
-    reelAnimating[pool] = true;
-    var shiftMs = 550;
-    var celebrateDelayMs = 450; // let the fireworks land on the just-booked name before advancing
-
-    setTimeout(function(){
-      requestAnimationFrame(function(){
-        requestAnimationFrame(function(){
-          track.style.transition = "transform "+shiftMs+"ms cubic-bezier(0.22, 0.61, 0.36, 1)";
-          track.style.transform = "translateY(-"+ROW_STEP+"px)";
-        });
-      });
-    }, celebrateDelayMs);
-
-    var finished = false;
-    function onDone(){
-      if(finished) return;
-      finished = true;
-      track.removeEventListener("transitionend", onDone);
-      track.style.transition = "none";
-      track.style.transform = "translateY(0px)";
-      reelAnimating[pool] = false;
-      requestAnimationFrame(function(){ track.style.transition = ""; });
-      done();
-    }
-    track.addEventListener("transitionend", onDone);
-    setTimeout(onDone, celebrateDelayMs + shiftMs + 150);
-  }
-
-  // ---------- Book meeting ----------
-  function updateSpinReady(pool){
-    var ui = POOL_UI[pool];
-    var name = (document.getElementById(ui.bdrInput).value || "").trim();
-    var queue = (state.nextQueue && state.nextQueue[pool]) || [];
-    document.getElementById(ui.spinBtn).disabled = booking[pool] || queue.length===0 || name.length===0;
-  }
-
-  function doSpin(pool){
-    if(booking[pool]) return;
-    var ui = POOL_UI[pool];
-    if(((state.nextQueue && state.nextQueue[pool]) || []).length===0){
-      document.getElementById(ui.resultSlot).innerHTML = '<div class="result-placeholder">Activate at least one AE in Admin first.</div>';
-      return;
-    }
-    var bdrName = (document.getElementById(ui.bdrInput).value || "").trim();
-    if(!bdrName){
-      document.getElementById(ui.bdrHint).textContent = "Enter your name before booking.";
-      document.getElementById(ui.bdrInput).focus();
-      return;
-    }
-    document.getElementById(ui.bdrHint).textContent = "";
-    booking[pool] = true;
-    document.getElementById(ui.spinBtn).disabled = true;
-    document.getElementById(ui.resultSlot).innerHTML = '<div class="result-placeholder">Booking…</div>';
-
-    localStorage.setItem("rr_bdr_name", bdrName);
-
-    api("/api/spin", { method:"POST", body:{ bdrName: bdrName, pool: pool } }).then(function(res){
-      playReelSpin(pool, res.winner, function(){
-        fetchState().then(function(){ showResult(pool, res.entry); });
-      });
-    }).catch(function(err){
-      booking[pool] = false;
-      document.getElementById(ui.spinBtn).disabled = false;
-      document.getElementById(ui.resultSlot).innerHTML = '<div class="result-placeholder">'+escapeHtml(err.message)+'</div>';
-    });
-  }
-
-  function showResult(pool, entry){
-    var ui = POOL_UI[pool];
-    var ae = state.aes.find(function(a){ return a.id===entry.aeId; });
-    var scheduleHtml = "";
-    if(ae && ae.email){
-      scheduleHtml = '<a class="btn-secondary schedule-link" id="scheduleLink'+pool+'" href="'+escapeHtml(scheduleMeetingLink(ae, entry.accountName, entry.bdrName))+'" target="_blank" rel="noopener">Schedule meeting ↗</a>';
-    }
-    document.getElementById(ui.resultSlot).innerHTML =
-      '<div class="result-account-quickadd"><input type="text" id="quickAccountInput'+pool+'" placeholder="Account name (optional)" /></div>' +
-      scheduleHtml;
-    var quickInput = document.getElementById("quickAccountInput"+pool);
-    quickInput.addEventListener("change", function(){
-      api("/api/log/account", { method:"POST", body:{ id: entry.id, accountName: quickInput.value.trim() } })
-        .then(fetchState);
-    });
-    quickInput.addEventListener("input", function(){
-      if(!ae || !ae.email) return;
-      var link = document.getElementById("scheduleLink"+pool);
-      if(link) link.href = scheduleMeetingLink(ae, quickInput.value.trim(), entry.bdrName);
-    });
-    quickInput.focus();
-    booking[pool] = false;
-    updateSpinReady(pool);
-  }
-
-  // ---------- Log rendering ----------
-  function statusPillsHtml(entry){
-    var out = "";
-    if(!entry.held && !entry.lost) out += '<span class="pill pill-booked">Booked</span>';
-    if(entry.held) out += '<span class="pill pill-held">Held</span>';
-    if(entry.lost) out += '<span class="pill pill-lost">No show</span>';
-    if(entry.forced) out += '<span class="pill pill-manual">Manual</span>';
-    if(entry.flagged) out += '<span class="pill pill-flagged">Flagged</span>';
-    return out;
-  }
-
-  // Options for the retroactive-reassign dropdown, grouped by pool so a
-  // cross-pool move is an explicit choice rather than an accident.
-  function aeOptionsHtml(selectedId, fallbackName){
-    var html = "";
-    // An entry can point at an AE who has since been removed from the roster.
-    // Surface that as a selected placeholder instead of silently showing
-    // whoever happens to sit first in the list.
-    var known = state.aes.some(function(a){ return a.id===selectedId; });
-    if(!known){
-      html += '<option value="" selected>'+escapeHtml(fallbackName || "Unknown")+' (no longer on roster)</option>';
-    }
-    POOLS.forEach(function(pool){
-      var list = state.aes.filter(function(a){ return a.pool===pool; });
-      if(list.length===0) return;
-      html += '<optgroup label="'+(pool==="ramping" ? "Ramping Reps" : "Core AEs")+'">';
-      list.forEach(function(a){
-        html += '<option value="'+a.id+'"'+(a.id===selectedId ? ' selected' : '')+'>'+
-                escapeHtml(a.name)+(a.active ? '' : ' (inactive)')+'</option>';
-      });
-      html += '</optgroup>';
-    });
-    return html;
-  }
-
-  // ---------- Intro activity cells (Recent assignments) ----------
-  // Populated by the Salesforce sync once the entry is linked to an opp, and
-  // re-checked every sync run until settled. Three states per cell: no opp
-  // linked yet (nothing to check), checked and found, checked and not found.
-  function shortDate(iso, withTime){
-    var d = new Date(iso);
-    var o = withTime ? { month:"short", day:"numeric", hour:"numeric", minute:"2-digit" } : { month:"short", day:"numeric" };
-    return d.toLocaleString([], o);
-  }
-
-  function introMeetingCell(entry){
-    if(!entry.oppId) return '<td class="activity-cell muted" title="No Salesforce opp linked yet">—</td>';
-    if(!entry.introMeetingAt){
-      return entry.activityCheckedAt
-        ? '<td class="activity-cell muted" title="No meeting found on the opp in Salesforce">Not set</td>'
-        : '<td class="activity-cell muted" title="Waiting for the next Salesforce sync">…</td>';
-    }
-    var upcoming = Date.parse(entry.introMeetingAt) > Date.now();
-    return '<td class="activity-cell'+(upcoming ? ' upcoming' : '')+'" title="'+(upcoming ? 'Upcoming' : 'Past')+'">'+
-      escapeHtml(shortDate(entry.introMeetingAt, true))+'</td>';
-  }
-
-  function introEmailCell(entry, key, who){
-    if(!entry.oppId) return '<td class="activity-cell muted" title="No Salesforce opp linked yet">—</td>';
-    var email = entry[key];
-    if(email){
-      var tip = who+" email sent "+shortDate(email.sentAt, true)+(email.subject ? ": "+email.subject : "");
-      return '<td class="activity-cell"><span class="pill pill-sent" title="'+escapeHtml(tip)+'">✓ '+escapeHtml(shortDate(email.sentAt))+'</span></td>';
-    }
-    if(!entry.activityCheckedAt) return '<td class="activity-cell muted" title="Waiting for the next Salesforce sync">…</td>';
-    return '<td class="activity-cell"><span class="pill pill-not-sent" title="No '+who+' intro email found on the contact as of '+
-      escapeHtml(shortDate(entry.activityCheckedAt, true))+'">Not yet</span></td>';
-  }
-
-  function logRowHtml(entry, opts){
-    opts = opts || {};
-    var oppNote = entry.oppName
-      ? '<div class="opp-link-note">↳ '+escapeHtml(entry.oppName)+(entry.oppStage ? ' · '+escapeHtml(entry.oppStage) : '')+'</div>'
-      : "";
-    var reassignNote = entry.reassignedFrom
-      ? '<div class="opp-link-note">↳ reassigned from '+escapeHtml(entry.reassignedFrom)+'</div>'
-      : "";
-    var aeCell = opts.allowReassign
-      ? '<td class="log-name"><select class="num-input reassign-select" data-action="reassign" data-id="'+entry.id+'" title="Reassign this deal to another AE">'+
-          aeOptionsHtml(entry.aeId, entry.name)+'</select>'+reassignNote+'</td>'
-      : '<td class="log-name" style="font-weight:600;">'+escapeHtml(entry.name)+reassignNote+'</td>';
-    var actions =
-      '<button class="flag-btn'+(entry.flagged?' active':'')+'" data-action="flag-log" data-id="'+entry.id+'" title="'+(entry.flagged?'Unflag':'Flag as a false click')+'">🚩</button>';
-    if(opts.showDelete){
-      actions += ' <button class="remove-btn" data-action="delete-log" data-id="'+entry.id+'" title="'+(opts.clearLabel||'Delete assignment')+'">'+(opts.clearLabel?opts.clearLabel:'✕')+'</button>';
-    }
-    var ts = new Date(entry.ts).toLocaleString([], { month:"short", day:"numeric", hour:"numeric", minute:"2-digit" });
-    var poolCell = opts.showPool
-      ? '<td class="hold-rate">'+(entry.pool==="ramping" ? "Ramping" : "Core")+'</td>'
-      : "";
-    return (
-      '<td class="hold-rate">'+escapeHtml(ts)+'</td>' +
-      poolCell +
-      '<td>'+escapeHtml(entry.bdrName || "—")+'</td>' +
-      aeCell +
-      '<td><input type="text" class="num-input account-input" placeholder="Account name" value="'+escapeHtml(entry.accountName || "")+'" data-action="account-name" data-id="'+entry.id+'"/>'+oppNote+'</td>' +
-      (opts.showActivity
-        ? introMeetingCell(entry) + introEmailCell(entry, "bdrIntroEmail", "BDR") + introEmailCell(entry, "aeIntroEmail", "AE")
-        : "") +
-      '<td>'+statusPillsHtml(entry)+'</td>' +
-      '<td style="white-space:nowrap;">'+actions+'</td>'
-    );
-  }
-
-  function attachLogRowHandlers(container){
-    container.querySelectorAll('[data-action="account-name"]').forEach(function(el){
-      el.addEventListener("change", function(){
-        api("/api/log/account", { method:"POST", body:{ id: el.getAttribute("data-id"), accountName: el.value.trim() } })
-          .then(fetchState);
-      });
-    });
-    container.querySelectorAll('[data-action="flag-log"]').forEach(function(el){
-      el.addEventListener("click", function(){
-        api("/api/log/flag", { method:"POST", body:{ id: el.getAttribute("data-id") } }).then(fetchState);
-      });
-    });
-    container.querySelectorAll('[data-action="reassign"]').forEach(function(el){
-      el.addEventListener("change", function(){
-        if(!el.value) return; // the "no longer on roster" placeholder
-        adminApi("/api/log/reassign", { method:"POST", body:{ id: el.getAttribute("data-id"), aeId: el.value } })
-          .then(fetchState);
-      });
-    });
-    container.querySelectorAll('[data-action="delete-log"]').forEach(function(el){
-      el.addEventListener("click", function(){
-        adminApi("/api/log/delete", { method:"POST", body:{ id: el.getAttribute("data-id") } }).then(fetchState);
-      });
-    });
-  }
-
-  // Only guards actual typed-text fields from being yanked mid-edit by a poll.
-  // Checkboxes/ranges are one-shot actions, not typing — they must not block
-  // re-render, or the whole table freezes right after any toggle click.
-  function isEditing(container){
-    var active = document.activeElement;
-    if(!active || !container.contains(active)) return false;
-    // A focused <select> may have its dropdown open; re-rendering would close
-    // it and discard the admin's half-made choice.
-    if(active.tagName === "SELECT") return true;
-    if(active.tagName !== "INPUT") return false;
-    return active.type !== "checkbox" && active.type !== "range";
-  }
-
-  function renderLog(pool){
-    var ui = POOL_UI[pool];
-    var container = document.getElementById(ui.logRows);
-    if(isEditing(container)) return; // don't yank focus out from under a typing BDR
-    var empty = document.getElementById(ui.emptyLog);
-    var entries = state.log.filter(function(e){ return e.pool===pool; });
-    container.innerHTML = "";
-    if(entries.length===0){ empty.style.display="block"; return; }
-    empty.style.display="none";
-    entries.slice(0,20).forEach(function(entry){
-      var tr = document.createElement("tr");
-      tr.innerHTML = logRowHtml(entry, {showDelete:false, showActivity:true});
-      container.appendChild(tr);
-    });
-    attachLogRowHandlers(container);
-  }
-
-  function renderAdminLog(){
-    var container = document.getElementById("adminLogBody");
-    if(!container || isEditing(container)) return;
-    var empty = document.getElementById("adminEmptyLog");
-    container.innerHTML = "";
-    if(state.log.length===0){ empty.style.display = "block"; return; }
-    empty.style.display = "none";
-    state.log.forEach(function(entry){
-      var tr = document.createElement("tr");
-      tr.innerHTML = logRowHtml(entry, {showDelete:true, showPool:true, allowReassign:true});
-      container.appendChild(tr);
-    });
-    attachLogRowHandlers(container);
-  }
-
-  function renderFlaggedReview(){
-    var container = document.getElementById("flaggedLogBody");
-    if(!container || isEditing(container)) return;
-    var empty = document.getElementById("flaggedEmptyLog");
-    var flagged = state.log.filter(function(e){ return e.flagged; });
-    container.innerHTML = "";
-    if(flagged.length===0){ empty.style.display = "block"; return; }
-    empty.style.display = "none";
-    flagged.forEach(function(entry){
-      var tr = document.createElement("tr");
-      tr.innerHTML = logRowHtml(entry, {showDelete:true, clearLabel:"Clear", showPool:true, allowReassign:true});
-      container.appendChild(tr);
-    });
-    attachLogRowHandlers(container);
-  }
-
-  function renderBdrSuggestions(){
-    var names = Array.from(new Set(state.log.map(function(e){ return e.bdrName; }).filter(Boolean)));
-    var optionsHtml = names.map(function(n){ return '<option value="'+escapeHtml(n)+'"></option>'; }).join("");
-    POOLS.forEach(function(pool){
-      var dl = document.getElementById(POOL_UI[pool].bdrSuggestions);
-      if(dl) dl.innerHTML = optionsHtml;
-    });
-  }
-
-  // ---------- Stat strip ----------
-  function renderStats(pool){
-    var ui = POOL_UI[pool];
-    var strip = document.getElementById(ui.statStrip);
-    var list = activeAes(pool);
-    strip.innerHTML = "";
-    list.forEach(function(a,i){
-      var rate = a.bookedRR>0 ? Math.round((a.heldRR/a.bookedRR)*100) : null;
-      var tile = document.createElement("div");
-      tile.className = "stat-tile";
-      tile.innerHTML =
-        '<span class="stat-label" style="color:'+colorFor(i)+'">'+escapeHtml(a.name)+'</span>' +
-        '<div class="stat-value small">'+a.bookedRR+' booked · '+a.heldRR+' held</div>' +
-        '<div style="font-size:12px; color:var(--ink-soft); margin-top:2px;">'+(rate===null?'—':rate+'%')+' hold rate via RR · '+a.totalHeld30d+' held all sources (30d)</div>';
-      strip.appendChild(tile);
-    });
-  }
-
-  // ---------- Live calendar panel (radical prototype — preview only) ----------
-  // Only reloads the iframe when the underlying AE actually changes, so the
-  // 4s poll doesn't reflicker the calendar every tick.
-  var calendarLoadedAeId = { core:null, ramping:null };
-
-  function renderCalendarPanel(pool){
-    var ui = POOL_UI[pool];
-    var titleEl = document.getElementById(ui.calendarPanelTitle);
-    var linkEl = document.getElementById(ui.calendarPanelOpenLink);
-    var emptyEl = document.getElementById(ui.calendarEmpty);
-    var iframeEl = document.getElementById(ui.calendarIframe);
-    var queue = (state.nextQueue && state.nextQueue[pool]) || [];
-    var nextItem = queue[0];
-    var ae = nextItem ? state.aes.find(function(a){ return a.id===nextItem.id; }) : null;
-
-    if(!ae){
-      titleEl.textContent = "Calendar";
-      linkEl.style.display = "none";
-      emptyEl.style.display = "block";
-      emptyEl.textContent = "Activate at least one AE to see their calendar.";
-      iframeEl.style.display = "none";
-      calendarLoadedAeId[pool] = null;
-      return;
-    }
-
-    titleEl.textContent = ae.name.split(" ")[0] + "’s calendar";
-
-    if(!ae.email){
-      linkEl.style.display = "none";
-      emptyEl.style.display = "block";
-      emptyEl.textContent = "Add "+ae.name+"'s email in Admin to see their live calendar here.";
-      iframeEl.style.display = "none";
-      calendarLoadedAeId[pool] = null;
-      return;
-    }
-
-    emptyEl.style.display = "none";
-    linkEl.style.display = "inline-block";
-    linkEl.href = "https://calendar.google.com/calendar/u/0?cid="+encodeURIComponent(ae.email);
-
-    if(calendarLoadedAeId[pool] !== ae.id){
-      calendarLoadedAeId[pool] = ae.id;
-      iframeEl.src = "https://calendar.google.com/calendar/embed?src="+encodeURIComponent(ae.email)+
-        "&mode=WEEK&showTitle=0&showPrint=0&showCalendars=0&showTz=0&showNav=1&showDate=1&bgcolor=%23FFFFFF";
-    }
-    iframeEl.style.display = "block";
-  }
-
-  // Builds a Google Calendar "quick add" link pre-filled with the AE (and
-  // account name, if entered) as guests — opens in a new tab, one click to
-  // save. Uses the BDR's own logged-in Google session; we never create the
-  // event ourselves.
-  function scheduleMeetingLink(ae, accountName, bdrName){
-    var title = accountName ? ("Basis <> " + accountName) : ("Basis intro call — " + ae.name);
-    var details = "Booked via the Basis round robin" + (bdrName ? (" by " + bdrName) : "") + ".";
-    var params = [
-      "action=TEMPLATE",
-      "text=" + encodeURIComponent(title),
-      "details=" + encodeURIComponent(details),
-      "add=" + encodeURIComponent(ae.email)
-    ];
-    return "https://calendar.google.com/calendar/render?" + params.join("&");
-  }
-
-  function renderHeaderSummary(){
-    var coreCount = activeAes("core").length;
-    var rampingCount = activeAes("ramping").length;
-    var total = coreCount + rampingCount;
-    var quick = document.getElementById("quickStat");
-    quick.textContent = total===0
-      ? "No active AEs configured"
-      : total+" AE"+(total>1?"s":"")+" active ("+coreCount+" core, "+rampingCount+" ramping) · "+state.log.length+" assigned total · live";
-  }
-
-  // ---------- Force-next-up override ----------
-  function renderOverride(pool){
-    var ui = POOL_UI[pool];
-    var select = document.getElementById(ui.overrideSelect);
-    var status = document.getElementById(ui.overrideStatus);
-    if(!select || !status) return;
-    if(document.activeElement === select) return; // don't collapse an open dropdown mid-poll
-
-    var list = activeAes(pool);
-    var currentId = (state.nextOverride && state.nextOverride[pool]) || "";
-    var previousPick = select.value;
-    select.innerHTML = '<option value="">Select an AE…</option>' + list.map(function(a){
-      return '<option value="'+a.id+'">'+escapeHtml(a.name)+'</option>';
-    }).join("");
-    // Keep an unsaved pick across polls; otherwise mirror the live override.
-    var stillValid = list.some(function(a){ return a.id===previousPick; });
-    select.value = (stillValid ? previousPick : currentId) || "";
-    select.disabled = list.length === 0;
-
-    var queue = (state.nextQueue && state.nextQueue[pool]) || [];
-    var forcedAe = currentId ? state.aes.find(function(a){ return a.id===currentId; }) : null;
-    if(forcedAe && forcedAe.active && forcedAe.pool===pool){
-      status.className = "override-status set";
-      status.textContent = "Forced: " + forcedAe.name + " takes the next booking in this pool, then the rotation resumes.";
-    } else if(currentId){
-      // The stored id no longer resolves (deactivated, moved pool, removed).
-      // The server already ignores it — say so rather than implying it holds.
-      status.className = "override-status stale";
-      status.textContent = "The AE queued up here is no longer active in this pool, so the override was dropped — the normal queue applies.";
-    } else {
-      status.className = "override-status";
-      status.textContent = queue.length
-        ? ("No override — " + queue[0].name + " is next up by weighting.")
-        : "No override set.";
+    } catch (e) {
+      $("asOf").textContent = "Couldn't load meetings. Refresh to try again.";
     }
   }
 
-  // ---------- Admin table ----------
-  function renderAdmin(pool){
-    var ui = POOL_UI[pool];
-    var body = document.getElementById(ui.tableBody);
-    if(!body || isEditing(body)) return;
-    body.innerHTML = "";
-    var poolAes = state.aes.filter(function(a){ return a.pool===pool; });
-    var actList = activeAes(pool);
-    var overall = state.overallHoldRate[pool];
+  const prefs = readPrefs();
+  if (prefs.timing) $("fTiming").value = prefs.timing;
+  if (prefs.status) $("fStatus").value = prefs.status;
+  if (prefs.sortDir === "desc") sortDir = "desc";
 
-    var weightSumActive = actList.reduce(function(s,a){ return s + Math.max(0,a.weight); }, 0);
-    var warn = document.getElementById(ui.weightWarning);
-    if(actList.length>0 && Math.abs(weightSumActive-100) > 0.5){
-      warn.style.display = "block";
-      warn.textContent = "Active target weights sum to "+Math.round(weightSumActive)+"%, not 100% — the wheel will still normalize proportionally, but consider rebalancing.";
-    } else {
-      warn.style.display = "none";
-    }
-
-    poolAes.forEach(function(a, idx){
-      var tr = document.createElement("tr");
-      if(!a.active) tr.className = "inactive";
-      var rate = a.bookedRR>0 ? (a.heldRR/a.bookedRR) : null;
-      var rateClass = "mid";
-      if(rate!==null && overall!==null && overall>0){
-        if(rate >= overall*1.1) rateClass = "high";
-        else if(rate <= overall*0.9) rateClass = "low";
-      }
-      var effVal = a.active ? state.effectiveWeights[pool][a.id] : null;
-
-      tr.innerHTML =
-        '<td><div class="switch"><input type="checkbox" '+(a.active?'checked':'')+' data-action="toggle-active" data-id="'+a.id+'"/><span class="slider-track"></span></div></td>' +
-        '<td><div class="ae-name-cell"><span class="swatch" style="background:'+colorFor(idx)+'"></span>'+escapeHtml(a.name)+'</div></td>' +
-        '<td><input type="email" class="num-input email-input" placeholder="name@ofbasis.com" value="'+escapeHtml(a.email||"")+'" data-action="email" data-id="'+a.id+'"/></td>' +
-        '<td><div class="weight-cell">' +
-          '<input type="range" min="0" max="100" value="'+a.weight+'" data-action="weight" data-id="'+a.id+'"/>' +
-          '<input type="number" min="0" max="100" class="num-input weight-num-input" value="'+a.weight+'" data-action="weight-num" data-id="'+a.id+'"/>' +
-          '<span class="weight-val">%</span>' +
-        '</div></td>' +
-        '<td><input type="number" min="0" class="num-input" value="'+a.bookedRR+'" data-action="bookedRR" data-id="'+a.id+'"/></td>' +
-        '<td><input type="number" min="0" class="num-input" value="'+a.heldRR+'" data-action="heldRR" data-id="'+a.id+'"/></td>' +
-        '<td class="hold-rate '+rateClass+'">'+(rate===null?'—':Math.round(rate*100)+'%')+'</td>' +
-        '<td><input type="number" min="0" class="num-input" value="'+a.totalHeld30d+'" data-action="totalHeld30d" data-id="'+a.id+'"/></td>' +
-        '<td class="eff-weight">'+(effVal==null?'—':effVal.toFixed(1)+'%')+'</td>' +
-        '<td><button class="remove-btn" data-action="remove" data-id="'+a.id+'" title="Remove">✕</button></td>';
-      body.appendChild(tr);
-    });
-
-    body.querySelectorAll('[data-action="toggle-active"]').forEach(function(el){
-      el.addEventListener("change", function(){
-        adminApi("/api/admin/ae", { method:"POST", body:{ action:"update", id: el.getAttribute("data-id"), patch:{ active: el.checked } } }).then(fetchState);
-      });
-    });
-    function saveWeight(id, value){
-      var v = Math.max(0, Math.min(100, parseInt(value,10) || 0));
-      adminApi("/api/admin/ae", { method:"POST", body:{ action:"update", id: id, patch:{ weight: v } } }).then(fetchState);
-    }
-    body.querySelectorAll('[data-action="weight"]').forEach(function(el){
-      var id = el.getAttribute("data-id");
-      el.addEventListener("input", function(){
-        var numEl = body.querySelector('[data-action="weight-num"][data-id="'+id+'"]');
-        if(numEl) numEl.value = el.value;
-      });
-      el.addEventListener("change", function(){ saveWeight(id, el.value); });
-    });
-    body.querySelectorAll('[data-action="weight-num"]').forEach(function(el){
-      var id = el.getAttribute("data-id");
-      el.addEventListener("input", function(){
-        var rangeEl = body.querySelector('[data-action="weight"][data-id="'+id+'"]');
-        if(rangeEl) rangeEl.value = el.value;
-      });
-      el.addEventListener("change", function(){ saveWeight(id, el.value); });
-    });
-    ["bookedRR","heldRR","totalHeld30d"].forEach(function(field){
-      body.querySelectorAll('[data-action="'+field+'"]').forEach(function(el){
-        el.addEventListener("change", function(){
-          var patch = {}; patch[field] = Math.max(0, parseInt(el.value,10) || 0);
-          adminApi("/api/admin/ae", { method:"POST", body:{ action:"update", id: el.getAttribute("data-id"), patch: patch } }).then(fetchState);
-        });
-      });
-    });
-    body.querySelectorAll('[data-action="email"]').forEach(function(el){
-      el.addEventListener("change", function(){
-        adminApi("/api/admin/ae", { method:"POST", body:{ action:"update", id: el.getAttribute("data-id"), patch:{ email: el.value.trim() } } }).then(fetchState);
-      });
-    });
-    body.querySelectorAll('[data-action="remove"]').forEach(function(el){
-      el.addEventListener("click", function(){
-        adminApi("/api/admin/ae", { method:"POST", body:{ action:"remove", id: el.getAttribute("data-id") } }).then(fetchState);
-      });
-    });
-
-    document.getElementById(ui.factorToggle).checked = !!state.factorHoldRate[pool];
-  }
-
-  function render(){
-    POOLS.forEach(function(pool){
-      renderReel(pool);
-      renderLog(pool);
-      renderStats(pool);
-      renderAdmin(pool);
-      renderOverride(pool);
-      renderCalendarPanel(pool);
-      updateSpinReady(pool);
-    });
-    renderAdminLog();
-    renderFlaggedReview();
-    renderBdrSuggestions();
-    renderHeaderSummary();
-    var pullLabel = document.getElementById("sfPullDateLabel");
-    if(pullLabel) pullLabel.textContent = state.sfPullDate ? new Date(state.sfPullDate).toLocaleString() : "never yet";
-    var cycleLabel = document.getElementById("cycleWindowLabel");
-    if(cycleLabel){
-      if(state.cycleStartedAt && state.cycleEndsAt){
-        var d = Math.max(0, Math.ceil((new Date(state.cycleEndsAt) - new Date()) / 86400000));
-        cycleLabel.textContent = "started " + new Date(state.cycleStartedAt).toLocaleDateString()
-          + ", resets " + new Date(state.cycleEndsAt).toLocaleDateString()
-          + " (" + d + " day" + (d === 1 ? "" : "s") + " left)";
-      } else {
-        cycleLabel.textContent = "—";
-      }
-    }
-  }
-
-  // ---------- View switching ----------
-  function setView(name){
-    document.querySelectorAll(".tab").forEach(function(t){ t.classList.remove("active"); });
-    document.querySelectorAll(".view").forEach(function(v){ v.classList.remove("active"); });
-    var tab = document.querySelector('.tab[data-view="'+name+'"]');
-    if(tab) tab.classList.add("active");
-    document.getElementById("view-"+name).classList.add("active");
-  }
-  document.querySelectorAll(".tab").forEach(function(tab){
-    tab.addEventListener("click", function(){ setView(tab.getAttribute("data-view")); });
+  ["fTiming", "fStatus", "fBdr", "fAe"].forEach(id => $(id).addEventListener("change", () => { savePrefs(); render(); }));
+  $("fSearch").addEventListener("input", render);
+  $("sortDays").querySelector("button").addEventListener("click", () => {
+    sortDir = sortDir === "asc" ? "desc" : "asc";
+    savePrefs();
+    render();
   });
 
-  // ---------- Admin password gate ----------
-  var gateOverlay = document.getElementById("gateOverlay");
-  var gatePassword = document.getElementById("gatePassword");
-  var gateError = document.getElementById("gateError");
-
-  function openGate(message){
-    gateError.textContent = message || "Incorrect password.";
-    gateError.classList.toggle("show", !!message);
-    gatePassword.value = "";
-    gateOverlay.classList.add("open");
-    setTimeout(function(){ gatePassword.focus(); }, 0);
-  }
-  function closeGate(){ gateOverlay.classList.remove("open"); }
-
-  document.getElementById("adminBtn").addEventListener("click", function(){
-    if(adminPassword){ setView("admin"); return; }
-    openGate();
-  });
-  document.getElementById("gateCancel").addEventListener("click", closeGate);
-  document.getElementById("gateSubmit").addEventListener("click", submitGate);
-  gatePassword.addEventListener("keydown", function(e){ if(e.key==="Enter") submitGate(); });
-  gateOverlay.addEventListener("click", function(e){ if(e.target===gateOverlay) closeGate(); });
-
-  function submitGate(){
-    var candidate = gatePassword.value;
-    api("/api/admin/login", { method:"POST", body:{ password: candidate } }).then(function(){
-      adminPassword = candidate;
-      sessionStorage.setItem("rr_admin_password", candidate);
-      document.getElementById("adminBtn").classList.add("unlocked");
-      closeGate();
-      setView("admin");
-      fetchState();
-    }).catch(function(){
-      gateError.textContent = "Incorrect password.";
-      gateError.classList.add("show");
-    });
-  }
-
-  // ---------- BDR identity (per-device convenience only, not shared state) ----------
-  // Same person books in either pool, so both name fields stay in sync live.
-  POOLS.forEach(function(pool){
-    var ui = POOL_UI[pool];
-    var input = document.getElementById(ui.bdrInput);
-    input.value = localStorage.getItem("rr_bdr_name") || "";
-    input.addEventListener("input", function(){
-      document.getElementById(ui.bdrHint).textContent = "";
-      localStorage.setItem("rr_bdr_name", input.value);
-      updateSpinReady(pool);
-      POOLS.forEach(function(otherPool){
-        if(otherPool===pool) return;
-        var otherInput = document.getElementById(POOL_UI[otherPool].bdrInput);
-        if(document.activeElement !== otherInput) otherInput.value = input.value;
-      });
-    });
-  });
-
-  POOLS.forEach(function(pool){
-    var ui = POOL_UI[pool];
-    document.getElementById(ui.spinBtn).addEventListener("click", function(){ doSpin(pool); });
-
-    var addBtn = document.getElementById(ui.addAeBtn);
-    var nameInput = document.getElementById(ui.newAeName);
-    addBtn.addEventListener("click", function(){
-      var name = nameInput.value.trim();
-      if(!name) return;
-      adminApi("/api/admin/ae", { method:"POST", body:{ action:"add", name:name, pool:pool } }).then(function(){
-        nameInput.value = "";
-        fetchState();
-      });
-    });
-    nameInput.addEventListener("keydown", function(e){ if(e.key==="Enter") addBtn.click(); });
-
-    var overrideSetBtn = document.getElementById(ui.overrideSetBtn);
-    var overrideClearBtn = document.getElementById(ui.overrideClearBtn);
-    if(overrideSetBtn) overrideSetBtn.addEventListener("click", function(){
-      var select = document.getElementById(ui.overrideSelect);
-      var aeId = select ? select.value : "";
-      var statusEl = document.getElementById(ui.overrideStatus);
-      if(!aeId){
-        if(statusEl) statusEl.textContent = "Pick an AE first.";
-        return;
-      }
-      adminApi("/api/admin/next-override", { method:"POST", body:{ pool:pool, aeId:aeId } })
-        .then(fetchState)
-        .catch(function(err){ if(statusEl) statusEl.textContent = err.message; });
-    });
-    if(overrideClearBtn) overrideClearBtn.addEventListener("click", function(){
-      adminApi("/api/admin/next-override", { method:"POST", body:{ pool:pool, aeId:null } }).then(function(){
-        var select = document.getElementById(ui.overrideSelect);
-        if(select) select.value = "";
-        return fetchState();
-      });
-    });
-
-    document.getElementById(ui.factorToggle).addEventListener("change", function(e){
-      adminApi("/api/admin/factor-hold", { method:"POST", body:{ pool:pool, value: e.target.checked } }).then(fetchState);
-    });
-  });
-
-  if(adminPassword) document.getElementById("adminBtn").classList.add("unlocked");
-
-  fetchState();
-  pollTimer = setInterval(fetchState, POLL_MS);
+  load();
 })();
