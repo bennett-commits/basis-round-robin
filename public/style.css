@@ -95,6 +95,8 @@
   .days{ font-variant-numeric:tabular-nums; font-weight:600; }
   .days.past{ color:var(--ink-soft); font-weight:400; }
 
+  .confirm{ display:flex; align-items:center; gap:6px; font-size:12px; color:var(--ink-soft); margin-bottom:5px; cursor:pointer; white-space:nowrap; }
+  .confirm input{ margin:0; cursor:pointer; }
   .pill{ display:inline-block; font-size:12px; padding:3px 9px; border-radius:999px; white-space:nowrap; }
   .pill.ok{ background:var(--accent-soft); color:var(--accent-strong); }
   .pill.warn{ background:var(--warn-soft); color:var(--warn); }

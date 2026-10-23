@@ -6,6 +6,7 @@
 
   let meetings = [];
   let sortDir = "asc";
+  let checks = {};
 
   const $ = id => document.getElementById(id);
 
@@ -68,8 +69,39 @@
     return node;
   }
 
-  function emailCell(email, days) {
+  // Manual confirmation that the email really went out, saved for everyone.
+  function checkBox(oppId, role) {
+    const label = el("label", "confirm");
+    const box = el("input");
+    box.type = "checkbox";
+    const at = checks[oppId] && checks[oppId][role];
+    box.checked = !!at;
+    if (at) label.title = "Confirmed " + fmtShortDate(at);
+    box.addEventListener("change", async () => {
+      const checked = box.checked;
+      box.disabled = true;
+      try {
+        const res = await fetch("/api/checks", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ oppId, role, checked })
+        });
+        if (!res.ok) throw new Error("save failed");
+        checks = (await res.json()).checks || {};
+      } catch (e) {
+        box.checked = !checked;
+        alert("Couldn't save that confirmation. Try again.");
+      }
+      render();
+    });
+    label.appendChild(box);
+    label.appendChild(el("span", null, "Confirmed sent"));
+    return label;
+  }
+
+  function emailCell(email, days, oppId, role) {
     const td = el("td");
+    td.appendChild(checkBox(oppId, role));
     if (email) {
       const pill = el("span", "pill ok", "Sent " + fmtShortDate(email.sentAt));
       if (email.subject) pill.title = email.subject;
@@ -182,8 +214,8 @@
       if (m.days !== null && m.days < 0) days.classList.add("past");
       tr.appendChild(days);
 
-      tr.appendChild(emailCell(m.bdrIntroEmail, m.days));
-      tr.appendChild(emailCell(m.aeIntroEmail, m.days));
+      tr.appendChild(emailCell(m.bdrIntroEmail, m.days, m.oppId, "bdr"));
+      tr.appendChild(emailCell(m.aeIntroEmail, m.days, m.oppId, "ae"));
 
       const st = el("td");
       st.appendChild(el("span", "status " + m.status, STATUS_LABEL[m.status] || m.status));
@@ -210,6 +242,7 @@
       const res = await fetch("/api/meetings", { cache: "no-store" });
       const data = await res.json();
       meetings = data.meetings || [];
+      checks = data.checks || {};
       $("asOf").textContent = data.asOf
         ? "Salesforce as of " + new Date(data.asOf).toLocaleString("en-US",
             { timeZone: TZ, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + " PT"

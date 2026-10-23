@@ -1,4 +1,4 @@
-import { loadDoc, saveDoc, applySync, json, requireSyncToken } from "./lib/meetings.js";
+import { loadDoc, saveDoc, applySync, json, requireSyncToken, loadChecks, setCheck } from "./lib/meetings.js";
 
 async function readJson(request) {
   try { return await request.json(); }
@@ -8,7 +8,20 @@ async function readJson(request) {
 const routes = {
   "GET /api/meetings": async ({ env }) => {
     const doc = await loadDoc(env);
-    return json({ asOf: doc.asOf, meetings: doc.meetings });
+    const checks = await loadChecks(env);
+    return json({ asOf: doc.asOf, meetings: doc.meetings, checks });
+  },
+
+  // Manual "I confirmed this email went out" ticks, one per opp per role.
+  // Stored apart from the meetings doc so the 6-hourly full-set sync, which
+  // replaces that doc, never wipes them.
+  "POST /api/checks": async ({ request, env }) => {
+    const body = await readJson(request);
+    if (!body || !body.oppId || !["bdr", "ae"].includes(body.role)) {
+      return json({ error: "Body must be JSON with oppId and role (bdr or ae)" }, { status: 400 });
+    }
+    const checks = await setCheck(env, String(body.oppId), body.role, !!body.checked);
+    return json({ ok: true, checks });
   },
 
   // The every-6-hours Salesforce sync posts the full set of BDR-booked

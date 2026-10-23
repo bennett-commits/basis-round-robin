@@ -27,6 +27,26 @@ export async function loadDoc(env) {
   }
 }
 
+const CHECKS_KEY = "checks";
+
+// { [oppId]: { bdr?: ISO timestamp, ae?: ISO timestamp } }
+export async function loadChecks(env) {
+  const raw = await env.RR_KV.get(CHECKS_KEY);
+  if (!raw) return {};
+  try { return JSON.parse(raw) || {}; } catch (e) { return {}; }
+}
+
+export async function setCheck(env, oppId, role, checked) {
+  const checks = await loadChecks(env);
+  const entry = checks[oppId] || {};
+  if (checked) entry[role] = new Date().toISOString();
+  else delete entry[role];
+  if (Object.keys(entry).length) checks[oppId] = entry;
+  else delete checks[oppId];
+  await env.RR_KV.put(CHECKS_KEY, JSON.stringify(checks));
+  return checks;
+}
+
 export async function saveDoc(env, doc) {
   await env.RR_KV.put(MEETINGS_KEY, JSON.stringify(doc));
 }
