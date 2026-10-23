@@ -17,8 +17,8 @@ const routes = {
   // replaces that doc, never wipes them.
   "POST /api/checks": async ({ request, env }) => {
     const body = await readJson(request);
-    if (!body || !body.oppId || !["bdr", "ae"].includes(body.role)) {
-      return json({ error: "Body must be JSON with oppId and role (bdr or ae)" }, { status: 400 });
+    if (!body || !body.oppId || !["bdr", "ae", "false"].includes(body.role)) {
+      return json({ error: "Body must be JSON with oppId and role (bdr, ae or false)" }, { status: 400 });
     }
     const checks = await setCheck(env, String(body.oppId), body.role, !!body.checked);
     return json({ ok: true, checks });

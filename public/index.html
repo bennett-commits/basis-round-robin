@@ -41,6 +41,13 @@
         <option value="not_sent">Not sent</option>
       </select>
     </label>
+    <label>Falsely added
+      <select id="fFalse">
+        <option value="hide">Hide</option>
+        <option value="show">Show</option>
+        <option value="only">Only</option>
+      </select>
+    </label>
     <label>BDR
       <select id="fBdr"><option value="all">All BDRs</option></select>
     </label>
@@ -78,7 +85,7 @@
     Synced from Salesforce every 6 hours. <strong>Held</strong> = the opp reached Discovery.
     <strong>No show</strong> = closed lost without ever reaching Discovery.
     The AE follow-up email is the AE's pre-meeting email asking discovery questions.
-    Tick <strong>Confirmed sent</strong> yourself once you've checked the email went out; ticks are shared and survive syncs.
+    Tick <strong>Confirmed sent</strong> yourself once you've checked the email went out; ticks are shared and survive syncs. Tick <strong>Falsely added</strong> on a meeting that never should have been listed: it drops out of every count and is hidden unless you set that filter to Show or Only.
   </p>
 </div>
 <script src="app.js"></script>

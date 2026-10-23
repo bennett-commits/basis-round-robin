@@ -75,9 +75,13 @@
     return !!(email || (checks[m.oppId] && checks[m.oppId][role]));
   }
 
+  function isFalse(m) {
+    return !!(checks[m.oppId] && checks[m.oppId]["false"]);
+  }
+
   // Manual confirmation that the email really went out, saved for everyone.
-  function checkBox(oppId, role) {
-    const label = el("label", "confirm");
+  function checkBox(oppId, role, text) {
+    const label = el("label", "confirm" + (role === "false" ? " flag" : ""));
     const box = el("input");
     box.type = "checkbox";
     const at = checks[oppId] && checks[oppId][role];
@@ -101,7 +105,7 @@
       render();
     });
     label.appendChild(box);
-    label.appendChild(el("span", null, "Confirmed sent"));
+    label.appendChild(el("span", null, text || "Confirmed sent"));
     return label;
   }
 
@@ -144,9 +148,13 @@
     const bdr = $("fBdr").value;
     const ae = $("fAe").value;
     const q = $("fSearch").value.trim().toLowerCase();
+    // Falsely added meetings are out of every count unless asked for.
+    const falseMode = forWeekStat ? "hide" : $("fFalse").value;
     return meetings
       .map(m => Object.assign({}, m, { days: daysUntil(m.meetingDate, today) }))
       .filter(m => {
+        if (falseMode === "hide" && isFalse(m)) return false;
+        if (falseMode === "only" && !isFalse(m)) return false;
         if (timing === "upcoming" && !(m.days !== null && m.days >= 0)) return false;
         if (timing === "past" && !(m.days !== null && m.days < 0)) return false;
         if (status !== "all" && m.status !== status) return false;
@@ -215,6 +223,8 @@
       const acct = el("td", "acct");
       acct.appendChild(el("div", "acct-name", m.accountName));
       if (m.bookedAt) acct.appendChild(el("div", "sub", "Booked " + fmtShortDate(m.bookedAt)));
+      acct.appendChild(checkBox(m.oppId, "false", "Falsely added"));
+      if (isFalse(m)) tr.classList.add("falsely");
       tr.appendChild(acct);
 
       tr.appendChild(el("td", "nowrap", m.bdrName || "—"));
@@ -273,7 +283,7 @@
   if (prefs.bdrEmail) $("fBdrEmail").value = prefs.bdrEmail;
   if (prefs.sortDir === "desc") sortDir = "desc";
 
-  ["fTiming", "fStatus", "fBdrEmail", "fBdr", "fAe"].forEach(id => $(id).addEventListener("change", () => { savePrefs(); render(); }));
+  ["fTiming", "fStatus", "fBdrEmail", "fFalse", "fBdr", "fAe"].forEach(id => $(id).addEventListener("change", () => { savePrefs(); render(); }));
   $("fSearch").addEventListener("input", render);
   $("sortDays").querySelector("button").addEventListener("click", () => {
     sortDir = sortDir === "asc" ? "desc" : "asc";
