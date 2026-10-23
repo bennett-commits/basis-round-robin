@@ -39,7 +39,10 @@ export async function loadChecks(env) {
 export async function setCheck(env, oppId, role, checked) {
   const checks = await loadChecks(env);
   const entry = checks[oppId] || {};
-  if (checked) entry[role] = new Date().toISOString();
+  // "Confirmed sent" and "Falsely tagged" contradict each other: setting one
+  // clears the other for the same email.
+  const opposite = role.endsWith("False") ? role.slice(0, -5) : role + "False";
+  if (checked) { entry[role] = new Date().toISOString(); delete entry[opposite]; }
   else delete entry[role];
   if (Object.keys(entry).length) checks[oppId] = entry;
   else delete checks[oppId];

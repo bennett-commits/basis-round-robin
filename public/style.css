@@ -97,9 +97,6 @@
 
   .confirm{ display:flex; align-items:center; gap:6px; font-size:12px; color:var(--ink-soft); margin-bottom:5px; cursor:pointer; white-space:nowrap; }
   .confirm input{ margin:0; cursor:pointer; }
-  tr.falsely td{ opacity:.5; }
-  tr.falsely .acct-name{ text-decoration:line-through; }
-  .confirm.flag{ margin:5px 0 0; }
   .pill{ display:inline-block; font-size:12px; padding:3px 9px; border-radius:999px; white-space:nowrap; }
   .pill.ok{ background:var(--accent-soft); color:var(--accent-strong); }
   .pill.warn{ background:var(--warn-soft); color:var(--warn); }

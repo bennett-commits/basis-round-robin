@@ -70,23 +70,23 @@
   }
 
   // An email counts as sent if Salesforce found it or someone ticked it.
+  // A "Falsely tagged" tick means the tag Salesforce found isn't a real
+  // intro email, so it overrides everything and counts as not sent.
   function isSent(m, role) {
     const email = role === "bdr" ? m.bdrIntroEmail : m.aeIntroEmail;
-    return !!(email || (checks[m.oppId] && checks[m.oppId][role]));
-  }
-
-  function isFalse(m) {
-    return !!(checks[m.oppId] && checks[m.oppId]["false"]);
+    const c = checks[m.oppId] || {};
+    if (c[role + "False"]) return false;
+    return !!(email || c[role]);
   }
 
   // Manual confirmation that the email really went out, saved for everyone.
   function checkBox(oppId, role, text) {
-    const label = el("label", "confirm" + (role === "false" ? " flag" : ""));
+    const label = el("label", "confirm");
     const box = el("input");
     box.type = "checkbox";
     const at = checks[oppId] && checks[oppId][role];
     box.checked = !!at;
-    if (at) label.title = "Confirmed " + fmtShortDate(at);
+    if (at) label.title = (text ? "Marked " : "Confirmed ") + fmtShortDate(at);
     box.addEventListener("change", async () => {
       const checked = box.checked;
       box.disabled = true;
@@ -112,8 +112,13 @@
   function emailCell(email, days, oppId, role) {
     const td = el("td");
     td.appendChild(checkBox(oppId, role));
+    td.appendChild(checkBox(oppId, role + "False", "Falsely tagged"));
     const confirmedAt = checks[oppId] && checks[oppId][role];
-    if (!email && confirmedAt) {
+    if (checks[oppId] && checks[oppId][role + "False"]) {
+      const pill = el("span", "pill warn", "Falsely tagged");
+      pill.title = email && email.subject ? "Salesforce tagged: " + email.subject : "Marked falsely tagged";
+      td.appendChild(pill);
+    } else if (!email && confirmedAt) {
       const pill = el("span", "pill ok", "Sent " + fmtShortDate(confirmedAt));
       pill.title = "Confirmed manually";
       td.appendChild(pill);
@@ -148,13 +153,9 @@
     const bdr = $("fBdr").value;
     const ae = $("fAe").value;
     const q = $("fSearch").value.trim().toLowerCase();
-    // Falsely added meetings are out of every count unless asked for.
-    const falseMode = forWeekStat ? "hide" : $("fFalse").value;
     return meetings
       .map(m => Object.assign({}, m, { days: daysUntil(m.meetingDate, today) }))
       .filter(m => {
-        if (falseMode === "hide" && isFalse(m)) return false;
-        if (falseMode === "only" && !isFalse(m)) return false;
         if (timing === "upcoming" && !(m.days !== null && m.days >= 0)) return false;
         if (timing === "past" && !(m.days !== null && m.days < 0)) return false;
         if (status !== "all" && m.status !== status) return false;
@@ -223,8 +224,6 @@
       const acct = el("td", "acct");
       acct.appendChild(el("div", "acct-name", m.accountName));
       if (m.bookedAt) acct.appendChild(el("div", "sub", "Booked " + fmtShortDate(m.bookedAt)));
-      acct.appendChild(checkBox(m.oppId, "false", "Falsely added"));
-      if (isFalse(m)) tr.classList.add("falsely");
       tr.appendChild(acct);
 
       tr.appendChild(el("td", "nowrap", m.bdrName || "—"));
@@ -283,7 +282,7 @@
   if (prefs.bdrEmail) $("fBdrEmail").value = prefs.bdrEmail;
   if (prefs.sortDir === "desc") sortDir = "desc";
 
-  ["fTiming", "fStatus", "fBdrEmail", "fFalse", "fBdr", "fAe"].forEach(id => $(id).addEventListener("change", () => { savePrefs(); render(); }));
+  ["fTiming", "fStatus", "fBdrEmail", "fBdr", "fAe"].forEach(id => $(id).addEventListener("change", () => { savePrefs(); render(); }));
   $("fSearch").addEventListener("input", render);
   $("sortDays").querySelector("button").addEventListener("click", () => {
     sortDir = sortDir === "asc" ? "desc" : "asc";
