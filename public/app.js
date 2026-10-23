@@ -69,6 +69,12 @@
     return node;
   }
 
+  // An email counts as sent if Salesforce found it or someone ticked it.
+  function isSent(m, role) {
+    const email = role === "bdr" ? m.bdrIntroEmail : m.aeIntroEmail;
+    return !!(email || (checks[m.oppId] && checks[m.oppId][role]));
+  }
+
   // Manual confirmation that the email really went out, saved for everyone.
   function checkBox(oppId, role) {
     const label = el("label", "confirm");
@@ -102,7 +108,12 @@
   function emailCell(email, days, oppId, role) {
     const td = el("td");
     td.appendChild(checkBox(oppId, role));
-    if (email) {
+    const confirmedAt = checks[oppId] && checks[oppId][role];
+    if (!email && confirmedAt) {
+      const pill = el("span", "pill ok", "Sent " + fmtShortDate(confirmedAt));
+      pill.title = "Confirmed manually";
+      td.appendChild(pill);
+    } else if (email) {
       const pill = el("span", "pill ok", "Sent " + fmtShortDate(email.sentAt));
       if (email.subject) pill.title = email.subject;
       td.appendChild(pill);
@@ -139,8 +150,8 @@
         if (timing === "upcoming" && !(m.days !== null && m.days >= 0)) return false;
         if (timing === "past" && !(m.days !== null && m.days < 0)) return false;
         if (status !== "all" && m.status !== status) return false;
-        if (bdrEmail === "sent" && !m.bdrIntroEmail) return false;
-        if (bdrEmail === "not_sent" && m.bdrIntroEmail) return false;
+        if (bdrEmail === "sent" && !isSent(m, "bdr")) return false;
+        if (bdrEmail === "not_sent" && isSent(m, "bdr")) return false;
         if (bdr !== "all" && m.bdrName !== bdr) return false;
         if (ae !== "all" && m.aeName !== ae) return false;
         if (q && !(m.accountName || "").toLowerCase().includes(q)) return false;
@@ -171,12 +182,12 @@
     const upcoming = rows.filter(m => m.days !== null && m.days >= 0);
     const scope = upcoming.length ? upcoming : rows;
     const scopeLabel = upcoming.length ? "upcoming" : "shown";
-    const bdrSent = scope.filter(m => m.bdrIntroEmail).length;
-    const aeSent = scope.filter(m => m.aeIntroEmail).length;
+    const bdrSent = scope.filter(m => isSent(m, "bdr")).length;
+    const aeSent = scope.filter(m => isSent(m, "ae")).length;
     const pct = (n, d) => d ? Math.round((n / d) * 100) + "%" : "—";
     const range = thisWeekRange(today);
     const thisWeek = filtered(today, true).filter(m => m.days !== null && m.days >= range.start && m.days <= range.end);
-    const weekSent = thisWeek.filter(m => m.bdrIntroEmail).length;
+    const weekSent = thisWeek.filter(m => isSent(m, "bdr")).length;
     [
       ["BDR intro sent · meetings this week (" + weekLabel(today, range) + ")",
         pct(weekSent, thisWeek.length) + " · " + weekSent + " of " + thisWeek.length],
